@@ -5,7 +5,7 @@ import Strokes from "@/models/strokes";
 
 export const addstrokes = async (data) => {
   await connectdb();
-
+  console.log(data,"data")
    const wb = new Strokes({
     // color,size,
     strokes: [
@@ -25,7 +25,7 @@ export const getstrokes = async () => {
   // keep each stroke as a separate array of points
   const strokesPoints = wb.flatMap(doc => 
     doc.strokes.map(stroke => 
-      stroke.points.map(pt => ({ x: pt.x, y: pt.y }))
+      stroke.points.map(pt => ({color:pt.color,stroke:pt.stroke, x: pt.x, y: pt.y }))
     )
   );
 

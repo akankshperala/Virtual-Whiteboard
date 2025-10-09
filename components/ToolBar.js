@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { FaTools, FaPen, FaEraser, FaShapes, FaRegSquare, FaRegCircle, FaMinus, FaTrash, FaUndo, FaRedo, FaPalette } from 'react-icons/fa';
 
-export default function ToolBar() {
+export default function ToolBar({ setColor, setStroke ,setiserasing ,iserasing}) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTool, setActiveTool] = useState(null);
   const toolbarRef = useRef(null);
@@ -20,7 +20,7 @@ export default function ToolBar() {
     // Toggles the active tool. If the same tool is clicked again, it closes the menu.
     setActiveTool(activeTool === toolName ? null : toolName);
   };
-  
+
   const handleActionClick = () => {
     // This will close any active tool menu when an action button is clicked
     setActiveTool(null);
@@ -81,14 +81,21 @@ export default function ToolBar() {
                   <h4 className="text-xs font-semibold mb-1">Thickness</h4>
                   <div className="flex gap-2 mb-2">
                     {thicknesses.map((t) => (
-                      <div key={t} className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-xs cursor-pointer hover:bg-gray-500">{t}</div>
+                      <div
+                        key={t}
+                        onClick={() => setStroke(t)}   // <-- update stroke width
+                        className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-xs cursor-pointer hover:bg-gray-500"
+                      >
+                        {t}
+                      </div>
                     ))}
+
                   </div>
                 </div>
               </div>
             )}
           </div>
-          
+
           {/* New Color Tool */}
           <div className="relative">
             <button
@@ -103,8 +110,14 @@ export default function ToolBar() {
                 <h4 className="text-xs font-semibold mb-1">Color</h4>
                 <div className="flex gap-2">
                   {colors.map((c) => (
-                    <div key={c} className="w-5 h-5 rounded-full cursor-pointer border-2 border-transparent hover:border-white transition-all duration-200" style={{ backgroundColor: c }}></div>
+                    <div
+                      key={c}
+                      onClick={() => setColor(c)}   // <-- update color
+                      className="w-5 h-5 rounded-full cursor-pointer border-2 border-transparent hover:border-white transition-all duration-200"
+                      style={{ backgroundColor: c }}
+                    ></div>
                   ))}
+
                 </div>
               </div>
             )}
@@ -113,7 +126,7 @@ export default function ToolBar() {
           {/* Shapes Tool */}
           <div className="relative">
             <button
-              onClick={() => handleToolClick('shapes')}
+              onClick={() => handleToolClick('shapes')} 
               className="p-3 rounded-lg hover:bg-gray-700 transition-colors duration-200"
               title="Shapes"
             >
@@ -135,14 +148,8 @@ export default function ToolBar() {
               className="p-3 rounded-lg hover:bg-gray-700 transition-colors duration-200"
               title="Eraser"
             >
-              <FaEraser size={20} className="text-gray-300 hover:text-white" />
+              <FaEraser onClick={()=>setiserasing(!iserasing)} size={20} className="text-gray-300 hover:text-white" />
             </button>
-            {activeTool === 'eraser' && (
-              <div className="absolute top-1/2 -right-2 -translate-y-1/2 translate-x-full bg-gray-800 p-3 rounded-lg shadow-xl text-white transition-all duration-200">
-                <h4 className="text-xs font-semibold mb-1">Eraser Size</h4>
-                <input type="range" min="1" max="10" className="w-24 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
-              </div>
-            )}
           </div>
 
           <div className="w-8 h-px bg-gray-700 my-2"></div>

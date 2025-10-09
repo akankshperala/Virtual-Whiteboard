@@ -3,10 +3,10 @@ import mongoose from "mongoose";
 const strokesSchema = new mongoose.Schema({
   strokes: [
     {
-      color: String,
-      size: Number,
       points: [
         {
+          color: String,
+          stroke: Number,
           x: Number,
           y: Number
         }
