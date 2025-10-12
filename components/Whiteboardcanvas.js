@@ -131,11 +131,12 @@ export default function WhiteboardCanvas({
       ctx.fillStyle = "rgba(0,0,0,0.3)";
       ctx.fill();
       ctx.strokeStyle = "black";
+      ctx.lineWidth = circle.size || 2
       ctx.stroke();
 
       if (currentShape.current === circle) {
         ctx.strokeStyle = circle.style || "#0077ff";
-        ctx.lineWidth = circle.size || 2;
+        ctx.lineWidth =  2;
         ctx.beginPath();
         ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
         ctx.stroke();
@@ -189,6 +190,8 @@ export default function WhiteboardCanvas({
             circles.current.push({
               x: first.x,
               y: first.y,
+              size: stroke.size,
+
               radius: pts[1]
                 ? Math.hypot(pts[1].x - first.x, pts[1].y - first.y)
                 : 50,
