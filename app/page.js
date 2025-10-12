@@ -8,6 +8,11 @@ import Menubar from "@/components/Menubar";
 
 export default function Page() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  // NEW: State to track the currently active drawing tool
+  const [activeTool, setActiveTool] = useState('pen'); 
+  const [color, setColor] = useState("black")
+  const [stroke, setStroke] = useState(2)
+  const [iserasing, setiserasing] = useState(true)
 
   return (
     <div className="w-screen h-screen relative overflow-hidden bg-amber-100">
@@ -26,11 +31,13 @@ export default function Page() {
           {/* TopBar */}
           <TopBar />
 
-          {/* Whiteboard */}
-          <WhiteboardCanvas />
+          {/* Whiteboard - Pass activeTool state */}
+          <WhiteboardCanvas activeTool={activeTool} color={color} stroke={stroke} iserasing={iserasing}/>
 
-          {/* Toolbar */}
-          <ToolBar isMenuOpen={isMenuOpen} />
+          {/* Toolbar - Pass setter function to update active tool state */}
+         
+          <ToolBar isMenuOpen={isMenuOpen} setColor={setColor} setStroke={setStroke} setiserasing={setiserasing} iserasing={iserasing} setActiveToolProp={setActiveTool} color={color}/>
+
         </div>
       </div>
     </div>
