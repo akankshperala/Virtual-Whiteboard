@@ -131,12 +131,12 @@ export default function WhiteboardCanvas({
       ctx.fillStyle = "rgba(0,0,0,0.3)";
       ctx.fill();
       ctx.strokeStyle = "black";
-      ctx.lineWidth = circle.size || 2
+      ctx.lineWidth = circle.size || 2;
       ctx.stroke();
 
       if (currentShape.current === circle) {
         ctx.strokeStyle = circle.style || "#0077ff";
-        ctx.lineWidth =  2;
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
         ctx.stroke();
@@ -173,8 +173,16 @@ export default function WhiteboardCanvas({
         console.log(points);
         if (!points || !Array.isArray(points)) return;
         points.forEach((stroke) => {
-          if (!stroke || !Array.isArray(stroke.points)) return;
-          const pts = stroke.points;
+          if (
+            !stroke ||
+            !Array.isArray(stroke.points) ||
+            stroke.points.length === 0
+          )
+            return;
+          const pts = stroke.points.filter(
+            (p) => p && typeof p.x === "number" && typeof p.y === "number"
+          );
+          if (pts.length === 0) return;
           const first = pts[0];
           console.log(stroke, "strokes");
           if (stroke.shape === "rectangle") {
@@ -281,7 +289,7 @@ export default function WhiteboardCanvas({
 
       draw();
     };
-    
+
     const handleMouseMove = (e) => {
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
