@@ -1,475 +1,549 @@
 "use client";
-import {
-  addstrokes,
-  getstrokes,
-  updateStrokes,
-} from "@/app/actions/useractions";
-import { useRef, useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { addstrokes, getstrokes, updateStrokes } from "@/app/actions/useractions";
 
-export default function WhiteboardCanvas({
-  activeTool,
-  color,
-  stroke,
-  iserasing,
-  clearTrigger,
-}) {
+export default function WhiteboardCanvas({ activeTool, color, stroke }) {
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
 
+  // shape storage
   const rectangles = useRef([]);
   const circles = useRef([]);
   const penStrokes = useRef([]);
-  const currentShape = useRef(null);
 
+  // selection
+  const currentShape = useRef(null); // used while interacting
+  const lastSelected = useRef(null);  // persists after mouseup (for Clear One)
+
+  // history tree
+  const historyRoot = useRef(null); // node structure { id, snapshot, parentId, childrenIds, createdAt }
+  const nodesMap = useRef({}); // id -> node
+  const currentNodeId = useRef(null);
+
+  // drawing flags
   const isDrawing = useRef(false);
   const isDragging = useRef(false);
   const isResizing = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
 
   const currentProps = useRef({ activeTool, color, stroke });
-
-  const handleRadius = 6;
   useEffect(() => {
     currentProps.current = { activeTool, color, stroke };
   }, [activeTool, color, stroke]);
-  useEffect(() => {
-    console.log("rect", rectangles);
-    console.log("circ", circles);
-    console.log("pen", penStrokes);
+
+  const handleRadius = 6;
+
+  // ---------------------------
+  // Helpers: history tree utils
+  // ---------------------------
+  const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+
+  const makeSnapshot = () => ({
+    rectangles: JSON.parse(JSON.stringify(rectangles.current)),
+    circles: JSON.parse(JSON.stringify(circles.current)),
+    penStrokes: JSON.parse(JSON.stringify(penStrokes.current)),
   });
 
-  // --- Helper Functions ---
+  const persistHistoryToLocal = () => {
+    try {
+      const payload = {
+        nodes: Object.values(nodesMap.current).map((n) => ({
+          id: n.id,
+          parentId: n.parentId,
+          childrenIds: n.childrenIds,
+          snapshot: n.snapshot,
+          createdAt: n.createdAt,
+        })),
+        currentId: currentNodeId.current,
+      };
+      localStorage.setItem("wb_history_tree", JSON.stringify(payload));
+    } catch (e) {
+      console.warn("persistHistory failed", e);
+    }
+  };
+
+  const restoreHistoryFromLocal = () => {
+    try {
+      const raw = localStorage.getItem("wb_history_tree");
+      if (!raw) return false;
+      const payload = JSON.parse(raw);
+      nodesMap.current = {};
+      payload.nodes.forEach((n) => {
+        nodesMap.current[n.id] = {
+          id: n.id,
+          parentId: n.parentId,
+          childrenIds: n.childrenIds || [],
+          snapshot: n.snapshot,
+          createdAt: n.createdAt,
+        };
+      });
+      currentNodeId.current = payload.currentId || Object.keys(nodesMap.current)[0] || null;
+      return true;
+    } catch (e) {
+      console.warn("restoreHistory failed", e);
+      return false;
+    }
+  };
+
+  const initHistory = (initialSnapshot) => {
+    const rootId = newId();
+    const node = {
+      id: rootId,
+      parentId: null,
+      childrenIds: [],
+      snapshot: initialSnapshot,
+      createdAt: Date.now(),
+    };
+    nodesMap.current = { [rootId]: node };
+    historyRoot.current = node;
+    currentNodeId.current = rootId;
+    persistHistoryToLocal();
+  };
+
+  const saveState = (fromUser = true) => {
+    const snap = makeSnapshot();
+    const id = newId();
+    const parentId = currentNodeId.current;
+    const node = {
+      id,
+      parentId,
+      childrenIds: [],
+      snapshot: snap,
+      createdAt: Date.now(),
+    };
+    nodesMap.current[id] = node;
+    if (parentId && nodesMap.current[parentId]) {
+      nodesMap.current[parentId].childrenIds.push(id);
+    }
+    currentNodeId.current = id;
+    persistHistoryToLocal();
+  };
+
+  const restoreNode = (nodeId) => {
+    const node = nodesMap.current[nodeId];
+    if (!node || !node.snapshot) return;
+    rectangles.current = JSON.parse(JSON.stringify(node.snapshot.rectangles || []));
+    circles.current = JSON.parse(JSON.stringify(node.snapshot.circles || []));
+    penStrokes.current = JSON.parse(JSON.stringify(node.snapshot.penStrokes || []));
+    currentNodeId.current = nodeId;
+    draw();
+    persistHistoryToLocal();
+  };
+
+  const undo = () => {
+    const cur = nodesMap.current[currentNodeId.current];
+    if (!cur) return;
+    const parentId = cur.parentId;
+    if (!parentId) return;
+    restoreNode(parentId);
+  };
+
+  const redo = () => {
+    const cur = nodesMap.current[currentNodeId.current];
+    if (!cur) return;
+    const childId = cur.childrenIds && cur.childrenIds.length ? cur.childrenIds[cur.childrenIds.length - 1] : null;
+    if (!childId) return;
+    restoreNode(childId);
+  };
+
+  // ---------------------------
+  // Drawing helpers / geometry
+  // ---------------------------
   const pointInsideRect = (x, y, rect) =>
-    x >= rect.x &&
-    x <= rect.x + rect.width &&
-    y >= rect.y &&
-    y <= rect.y + rect.height;
+    x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
 
   const pointInsideRectHandle = (x, y, rect) => {
     const hx = rect.x + rect.width;
     const hy = rect.y + rect.height;
-    const dx = x - hx;
-    const dy = y - hy;
-    return dx * dx + dy * dy <= handleRadius * handleRadius;
+    return Math.hypot(x - hx, y - hy) <= handleRadius;
   };
 
-  const pointInCircle = (x, y, circle) => {
-    const dx = x - circle.x;
-    const dy = y - circle.y;
-    return dx * dx + dy * dy <= circle.radius * circle.radius;
-  };
+  const pointInCircle = (x, y, circle) => Math.hypot(x - circle.x, y - circle.y) <= circle.radius;
 
-  const pointInCircleHandle = (x, y, circle) => {
-    const hx = circle.x + circle.radius;
-    const hy = circle.y;
-    const dx = x - hx;
-    const dy = y - hy;
-    return dx * dx + dy * dy <= handleRadius * handleRadius;
-  };
+  const pointInCircleHandle = (x, y, circle) =>
+    Math.hypot(x - (circle.x + circle.radius), y - circle.y) <= handleRadius;
 
-  // --- Draw function ---
+  // ---------------------------
+  // draw everything
+  // ---------------------------
   const draw = () => {
     const canvas = canvasRef.current;
     const ctx = ctxRef.current;
     if (!canvas || !ctx) return;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
     ctx.fillStyle = "white";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw pen strokes
+    // pen strokes
     penStrokes.current.forEach((stroke) => {
-      const points = Array.isArray(stroke)
-        ? stroke
-        : Array.isArray(stroke.arr)
-        ? stroke.arr
-        : null;
-      if (!points) return;
-
+      const points = stroke.arr || [];
+      if (!Array.isArray(points) || points.length < 1) return;
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
       points.forEach((p) => {
-        if (p && p.x != null && p.y != null) ctx.lineTo(p.x, p.y);
+        if (p && typeof p.x === "number" && typeof p.y === "number") ctx.lineTo(p.x, p.y);
       });
-      console.log(stroke);
-
-      ctx.strokeStyle = stroke.color || currentProps.current.color || "black";
-      ctx.lineWidth = stroke.size || currentProps.current.stroke || 2;
+      ctx.strokeStyle = stroke.color || "black";
+      ctx.lineWidth = stroke.size || 2;
       ctx.stroke();
     });
 
-    // Draw rectangles
+    // rectangles
     rectangles.current.forEach((rect) => {
-      // console.log(rect)
       if (!rect) return;
-      ctx.fillStyle = "rgba(0,0,0,0.3)";
-      ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.fillRect(rect.x, rect.y, rect.width || 0, rect.height || 0);
 
-      if (currentShape.current === rect) {
-        ctx.strokeStyle = rect.color || "#0077ff";
-        ctx.lineWidth = rect.size || 2;
-        ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+      const isSel = lastSelected.current === rect || currentShape.current === rect;
+      ctx.strokeStyle = isSel ? "#0077ff" : rect.color || "black";
+      ctx.lineWidth = rect.size || 2;
+      ctx.strokeRect(rect.x, rect.y, rect.width || 0, rect.height || 0);
 
+      if (isSel) {
         ctx.beginPath();
-        ctx.arc(
-          rect.x + rect.width,
-          rect.y + rect.height,
-          handleRadius,
-          0,
-          Math.PI * 2
-        );
+        ctx.arc(rect.x + (rect.width || 0), rect.y + (rect.height || 0), handleRadius, 0, Math.PI * 2);
         ctx.fillStyle = "#0077ff";
         ctx.fill();
       }
     });
 
-    // Draw circles
-    circles.current.forEach((circle) => {
-      if (!circle) return;
+    // circles
+    circles.current.forEach((c) => {
+      if (!c) return;
       ctx.beginPath();
-      ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(0,0,0,0.3)";
+      ctx.arc(c.x, c.y, c.radius || 0, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
       ctx.fill();
-      ctx.strokeStyle = "black";
-      ctx.lineWidth = circle.size || 2;
+      const isSel = lastSelected.current === c || currentShape.current === c;
+      ctx.strokeStyle = isSel ? "#0077ff" : c.color || "black";
+      ctx.lineWidth = c.size || 2;
       ctx.stroke();
 
-      if (currentShape.current === circle) {
-        ctx.strokeStyle = circle.style || "#0077ff";
-        ctx.lineWidth = 2;
+      if (isSel) {
         ctx.beginPath();
-        ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(
-          circle.x + circle.radius,
-          circle.y,
-          handleRadius,
-          0,
-          Math.PI * 2
-        );
+        ctx.arc(c.x + (c.radius || 0), c.y, handleRadius, 0, Math.PI * 2);
         ctx.fillStyle = "#0077ff";
         ctx.fill();
       }
     });
   };
 
+  // ---------------------------
+  // canvas mount & event handlers
+  // ---------------------------
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     ctxRef.current = ctx;
 
-    canvas.width = window.innerWidth * 0.9;
-    canvas.height = window.innerHeight * 0.8;
+    const resizeCanvas = () => {
+      canvas.width = Math.floor(window.innerWidth * 0.9);
+      canvas.height = Math.floor(window.innerHeight * 0.8);
+      draw();
+    };
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
 
-    ctx.fillStyle = "white";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Load strokes from backend
-    const loadStrokes = async () => {
+    // restore strokes from backend
+    (async () => {
       try {
         const points = await getstrokes();
-        console.log(points);
-        if (!points || !Array.isArray(points)) return;
-        points.forEach((stroke) => {
-          if (
-            !stroke ||
-            !Array.isArray(stroke.points) ||
-            stroke.points.length === 0
-          )
-            return;
-          const pts = stroke.points.filter(
-            (p) => p && typeof p.x === "number" && typeof p.y === "number"
-          );
-          if (pts.length === 0) return;
-          const first = pts[0];
-          console.log(stroke, "strokes");
-          if (stroke.shape === "rectangle") {
-            const rect = {
-              x: first.x,
-              y: first.y,
-              width: stroke.width,
-              height: stroke.height,
-              _id: stroke._id,
-            };
-            rectangles.current.push(rect);
-          } else if (stroke.shape === "circle") {
-            circles.current.push({
-              x: first.x,
-              y: first.y,
-              size: stroke.size,
+        if (Array.isArray(points) && points.length) {
+          points.forEach((stroke) => {
+            try {
+              if (!stroke || !Array.isArray(stroke.points) || stroke.points.length === 0) return;
+              const pts = stroke.points.filter((p) => p && typeof p.x === "number" && typeof p.y === "number");
+              if (!pts.length) return;
 
-              radius: pts[1]
-                ? Math.hypot(pts[1].x - first.x, pts[1].y - first.y)
-                : 50,
-              _id: stroke._id,
-            });
-          } else {
-            penStrokes.current.push({
-              arr: pts,
-              _id: stroke._id,
-              color: stroke.color,
-              size: stroke.size,
-            });
-          }
-        });
-
-        draw();
+              if (stroke.shape === "rectangle") {
+                rectangles.current.push({
+                  x: pts[0].x,
+                  y: pts[0].y,
+                  width: stroke.width || 0,
+                  height: stroke.height || 0,
+                  _id: stroke._id,
+                });
+              } else if (stroke.shape === "circle") {
+                circles.current.push({
+                  x: pts[0].x,
+                  y: pts[0].y,
+                  radius: stroke.points[1] ? Math.hypot(stroke.points[1].x - pts[0].x, stroke.points[1].y - pts[0].y) : 50,
+                  _id: stroke._id,
+                });
+              } else {
+                penStrokes.current.push({
+                  arr: pts,
+                  color: stroke.color,
+                  size: stroke.size,
+                  _id: stroke._id,
+                });
+              }
+            } catch (e) {
+              console.warn("skip stroke:", e);
+            }
+          });
+        }
       } catch (err) {
-        console.error(err);
+        console.error("load strokes error", err);
+      } finally {
+        const restored = restoreHistoryFromLocal();
+        if (restored && currentNodeId.current) {
+          restoreNode(currentNodeId.current);
+        } else {
+          const initialSnap = makeSnapshot();
+          initHistory(initialSnap);
+          draw();
+        }
       }
+    })();
+
+    // --- mouse & keyboard ---
+    const getXY = (e) => {
+      const r = canvas.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
-    loadStrokes();
-    console.log("rect", rectangles);
-    console.log("circ", circles);
-    console.log("pen", penStrokes);
-    // --- EVENTS ---
+
     const handleMouseDown = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const { x, y } = getXY(e);
 
-      // Resize handles
-      const rectHandle = rectangles.current.find((r) =>
-        pointInsideRectHandle(x, y, r)
-      );
-      const circHandle = circles.current.find((c) =>
-        pointInCircleHandle(x, y, c)
-      );
-      if (rectHandle) {
-        currentShape.current = rectHandle;
+      // select handles (resize)
+      const rectHandle = rectangles.current.find((r) => pointInsideRectHandle(x, y, r));
+      const circHandle = circles.current.find((c) => pointInCircleHandle(x, y, c));
+      if (rectHandle || circHandle) {
+        currentShape.current = rectHandle || circHandle;
+        lastSelected.current = currentShape.current;
         isResizing.current = true;
-        return;
-      }
-      if (circHandle) {
-        currentShape.current = circHandle;
-        isResizing.current = true;
+        draw();
         return;
       }
 
-      // Drag check
-      const rectShape = rectangles.current.find((r) =>
-        pointInsideRect(x, y, r)
-      );
+      // select shape (drag)
+      const rectShape = rectangles.current.find((r) => pointInsideRect(x, y, r));
       const circShape = circles.current.find((c) => pointInCircle(x, y, c));
-      if (rectShape) {
-        currentShape.current = rectShape;
+      if (rectShape || circShape) {
+        currentShape.current = rectShape || circShape;
+        lastSelected.current = currentShape.current;
         isDragging.current = true;
-        dragOffset.current = { x: x - rectShape.x, y: y - rectShape.y };
-        return;
-      }
-      if (circShape) {
-        currentShape.current = circShape;
-        isDragging.current = true;
-        dragOffset.current = { x: x - circShape.x, y: y - circShape.y };
+        dragOffset.current = { x: x - currentShape.current.x, y: y - currentShape.current.y };
+        draw();
         return;
       }
 
-      // New shapes or pen
+      // click outside → deselect
+      currentShape.current = null;
+      lastSelected.current = null;
+
+      // create new shapes or pen strokes
       if (currentProps.current.activeTool === "rectangle") {
-        const newRect = { x, y, width: 0, height: 0 };
+        const newRect = { x, y, width: 0, height: 0, color: currentProps.current.color, size: currentProps.current.stroke };
         rectangles.current.push(newRect);
         currentShape.current = newRect;
+        lastSelected.current = newRect;
         isResizing.current = true;
+        draw();
       } else if (currentProps.current.activeTool === "circle") {
-        const newCircle = { x, y, radius: 0 };
+        const newCircle = { x, y, radius: 0, color: currentProps.current.color, size: currentProps.current.stroke };
         circles.current.push(newCircle);
         currentShape.current = newCircle;
+        lastSelected.current = newCircle;
         isResizing.current = true;
+        draw();
       } else {
         isDrawing.current = true;
-        penStrokes.current.push({
-          arr: [{ x, y }],
-          color: currentProps.current.color, // store color immediately
-          size: currentProps.current.stroke, // store thickness
-          _id: null,
-        });
+        const strokeObj = { arr: [{ x, y }], color: currentProps.current.color, size: currentProps.current.stroke };
+        penStrokes.current.push(strokeObj);
+        lastSelected.current = strokeObj;
+        draw();
       }
-
-      draw();
     };
 
     const handleMouseMove = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const { x, y } = getXY(e);
 
-      // --- Pen drawing ---
-      if (
-        isDrawing.current &&
-        currentProps.current.activeTool !== "rectangle" &&
-        currentProps.current.activeTool !== "circle"
-      ) {
-        const currentStroke = penStrokes.current[penStrokes.current.length - 1];
-        const strokePoints = Array.isArray(currentStroke)
-          ? currentStroke
-          : currentStroke.arr;
-        strokePoints.push({ x, y });
+      if (isDrawing.current) {
+        const cur = penStrokes.current[penStrokes.current.length - 1];
+        if (!cur) return;
+        if (!Array.isArray(cur.arr)) cur.arr = [];
+        cur.arr.push({ x, y });
         draw();
         return;
       }
 
-      // Hover detection
-      if (!isDragging.current && !isResizing.current) {
-        const hoverRect = rectangles.current.find((r) =>
-          pointInsideRect(x, y, r)
-        );
-        const hoverCirc = circles.current.find((c) => pointInCircle(x, y, c));
-        currentShape.current = hoverRect || hoverCirc || null;
-      }
-
-      // Resizing
       if (isResizing.current && currentShape.current) {
         if (rectangles.current.includes(currentShape.current)) {
           currentShape.current.width = x - currentShape.current.x;
           currentShape.current.height = y - currentShape.current.y;
         } else if (circles.current.includes(currentShape.current)) {
-          currentShape.current.radius = Math.max(
-            Math.hypot(x - currentShape.current.x, y - currentShape.current.y),
-            10
-          );
+          currentShape.current.radius = Math.max(Math.hypot(x - currentShape.current.x, y - currentShape.current.y), 5);
         }
+        draw();
+        return;
       }
 
-      // Dragging
       if (isDragging.current && currentShape.current) {
-        if (rectangles.current.includes(currentShape.current)) {
-          currentShape.current.x = x - dragOffset.current.x;
-          currentShape.current.y = y - dragOffset.current.y;
-        } else if (circles.current.includes(currentShape.current)) {
-          currentShape.current.x = x - dragOffset.current.x;
-          currentShape.current.y = y - dragOffset.current.y;
-        }
+        currentShape.current.x = x - dragOffset.current.x;
+        currentShape.current.y = y - dragOffset.current.y;
+        draw();
+        return;
       }
 
+      // hover selection (non-persistent)
+      const hoverRect = rectangles.current.find((r) => pointInsideRect(x, y, r));
+      const hoverCirc = circles.current.find((c) => pointInCircle(x, y, c));
+      currentShape.current = hoverRect || hoverCirc || null;
       draw();
     };
 
     const handleMouseUp = async () => {
       const wasDrawing = isDrawing.current;
+      const wasResizing = isResizing.current;
+      const wasDragging = isDragging.current;
+
       isDrawing.current = false;
       isDragging.current = false;
       isResizing.current = false;
 
-      // Save pen strokes
       if (wasDrawing) {
-        const currentStroke = penStrokes.current[penStrokes.current.length - 1];
-        const strokePoints = Array.isArray(currentStroke)
-          ? currentStroke
-          : currentStroke.arr;
-        if (strokePoints.length > 0) {
+        const cur = penStrokes.current[penStrokes.current.length - 1];
+        const points = cur?.arr || [];
+        if (points.length > 0) {
           try {
             const res = await addstrokes({
               shape: "pen",
-              color: currentProps.current.color,
-              size: currentProps.current.stroke,
-              arr: strokePoints,
+              color: cur.color,
+              size: cur.size,
+              arr: points,
             });
-            // console.log(res,"ressss")
-            // penStrokes.current[penStrokes.current.length - 1]=res
-            if (res?._id) {
-              if (Array.isArray(currentStroke)) currentStroke._id = res._id;
-              else currentStroke._id = res._id;
-            }
+            if (res?._id) cur._id = res._id;
           } catch (err) {
-            console.error("Error saving pen stroke:", err);
+            console.error("save pen error", err);
           }
         }
       }
 
-      // Save rectangles/circles
-      if (currentShape.current) {
-        const s = currentShape.current;
-        let points = [];
-        let shapeType = currentProps.current.activeTool;
-        console.log(s);
-
-        if (rectangles.current.includes(s)) {
-          console.log(rectangles);
-          // points = [
-          //   { x: s.x, y: s.y },
-          //   { x: s.x + s.width, y: s.y },
-          //   { x: s.x + s.width, y: s.y + s.height },
-          //   { x: s.x, y: s.y + s.height },
-          //   { x: s.x, y: s.y },
-          // ];
-          shapeType = "rectangle";
-          try {
+      if (lastSelected.current) {
+        const s = lastSelected.current;
+        try {
+          if (rectangles.current.includes(s)) {
             if (s._id) {
               await updateStrokes(s._id, {
-                shape: shapeType,
-                color: "black",
+                shape: "rectangle",
+                color: s.color || "black",
                 arr: [{ x: s.x, y: s.y }],
                 width: s.width,
                 height: s.height,
-                type: shapeType,
+                type: "rectangle",
               });
             } else {
               const res = await addstrokes({
-                shape: shapeType,
-                color: "black",
+                shape: "rectangle",
+                color: s.color || "black",
                 arr: [{ x: s.x, y: s.y }],
                 width: s.width,
                 height: s.height,
-                type: shapeType,
+                type: "rectangle",
               });
               if (res?._id) s._id = res._id;
             }
-          } catch (err) {
-            console.error("Error saving shape:", err);
-          }
-        } else if (circles.current.includes(s)) {
-          points = [
-            { x: s.x, y: s.y },
-            { x: s.x + s.radius, y: s.y },
-          ];
-          shapeType = "circle";
-          if (points.length > 0) {
-            try {
-              if (s._id) {
-                await updateStrokes(s._id, {
-                  shape: shapeType,
-                  color: "black",
-                  arr: points,
-                });
-              } else {
-                const res = await addstrokes({
-                  shape: shapeType,
-                  color: "black",
-                  arr: points,
-                  type: shapeType,
-                });
-                if (res?._id) s._id = res._id;
-              }
-            } catch (err) {
-              console.error("Error saving shape:", err);
+          } else if (circles.current.includes(s)) {
+            const arrPts = [{ x: s.x, y: s.y }, { x: s.x + (s.radius || 0), y: s.y }];
+            if (s._id) {
+              await updateStrokes(s._id, {
+                shape: "circle",
+                color: s.color || "black",
+                arr: arrPts,
+              });
+            } else {
+              const res = await addstrokes({
+                shape: "circle",
+                color: s.color || "black",
+                arr: arrPts,
+                type: "circle",
+              });
+              if (res?._id) s._id = res._id;
             }
           }
+        } catch (err) {
+          console.error("save shape error", err);
         }
       }
 
+      if (wasDrawing || wasResizing || wasDragging) saveState(true);
       currentShape.current = null;
       draw();
+    };
+
+    const handleKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redo();
+      }
     };
 
     canvas.addEventListener("mousedown", handleMouseDown);
     canvas.addEventListener("mousemove", handleMouseMove);
     canvas.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("keydown", handleKey);
 
     return () => {
+      window.removeEventListener("resize", resizeCanvas);
       canvas.removeEventListener("mousedown", handleMouseDown);
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("keydown", handleKey);
     };
   }, []);
 
+  // ---------------------------
+  // clear / selection functions
+  // ---------------------------
+  const clearOne = () => {
+    const sel = lastSelected.current;
+    if (!sel) return;
+    rectangles.current = rectangles.current.filter((r) => r !== sel);
+    circles.current = circles.current.filter((c) => c !== sel);
+    penStrokes.current = penStrokes.current.filter((p) => p !== sel);
+    lastSelected.current = null;
+    saveState(true);
+    draw();
+  };
+
+  const clearAll = () => {
+    rectangles.current = [];
+    circles.current = [];
+    penStrokes.current = [];
+    lastSelected.current = null;
+    saveState(true);
+    draw();
+  };
+
+  // ---------------------------
+  // render
+  // ---------------------------
   return (
-    <div className="flex justify-center items-center w-full h-full">
+    <div className="flex flex-col items-center w-full h-full">
       <canvas
         ref={canvasRef}
         className="cursor-crosshair border-2 border-gray-400 rounded-lg bg-white"
       />
+      <div className="flex gap-3 mt-3">
+        <button onClick={undo} className="px-3 py-1 bg-gray-200 rounded">
+          Undo (Ctrl+Z)
+        </button>
+        <button onClick={redo} className="px-3 py-1 bg-gray-200 rounded">
+          Redo (Ctrl+Y)
+        </button>
+        <button onClick={clearOne} className="px-3 py-1 bg-gray-200 rounded">
+          Clear One (select a shape first)
+        </button>
+        <button onClick={clearAll} className="px-3 py-1 bg-red-500 text-white rounded">
+          Clear All
+        </button>
+      </div>
     </div>
   );
 }
