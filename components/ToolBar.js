@@ -1,10 +1,11 @@
 'use client';
 
+import { Trash2 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import { FaTools, FaPen, FaEraser, FaShapes, FaRegSquare, FaRegCircle, FaMinus, FaTrash, FaUndo, FaRedo, FaPalette } from 'react-icons/fa';
+import { FaTools, FaPen, FaEraser, FaShapes, FaRegSquare, FaRegCircle, FaMinus, FaTrash, FaUndo, FaRedo, FaPalette, FaTimes } from 'react-icons/fa';
 
 // Accept setActiveToolProp from parent (page.js)
-export default function ToolBar({ setActiveToolProp,setColor, setStroke ,setiserasing ,iserasing ,color  }) {
+export default function ToolBar({  setActiveToolProp, setColor, setStroke, setiserasing, iserasing, color }) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTool, setActiveTool] = useState('pen'); // Set 'pen' as default active tool
   const toolbarRef = useRef(null);
@@ -20,7 +21,7 @@ export default function ToolBar({ setActiveToolProp,setColor, setStroke ,setiser
     setActiveTool(newTool);
     setActiveToolProp(newTool); // Pass the active tool state up to the parent
   };
-  
+
   // New function to handle selection of a sub-tool (like rectangle)
   const handleSubToolClick = (toolName) => {
     setActiveTool(toolName);
@@ -32,7 +33,7 @@ export default function ToolBar({ setActiveToolProp,setColor, setStroke ,setiser
   const handleActionClick = () => {
     // This will close any active tool menu when an action button is clicked
     // We keep the last selected drawing tool active, for example 'pen'
-    setActiveTool(prev => prev === 'eraser' ? 'eraser' : 'pen'); 
+    setActiveTool(prev => prev === 'eraser' ? 'eraser' : 'pen');
   };
 
   useEffect(() => {
@@ -54,7 +55,7 @@ export default function ToolBar({ setActiveToolProp,setColor, setStroke ,setiser
 
   const colors = ['#000000', '#FF0000', '#0000FF', '#00FF00', '#FFFF00', '#800080', '#FFA500'];
   const thicknesses = [2, 4, 6, 8, 10];
-  const eraser_thicknesses = [10,15,20,25];
+  const eraser_thicknesses = [10, 15, 20, 25];
 
   return (
     <div className="fixed top-24 left-4 z-30">
@@ -90,14 +91,14 @@ export default function ToolBar({ setActiveToolProp,setColor, setStroke ,setiser
                   <h4 className="text-xs font-semibold mb-1">Thickness</h4>
                   <div className="flex gap-2 mb-2">
                     {thicknesses.map((t) => (
-                      <div key={t} onClick={() => setStroke(t)}className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-xs cursor-pointer hover:bg-gray-500">{t}</div>
+                      <div key={t} onClick={() => setStroke(t)} className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-xs cursor-pointer hover:bg-gray-500">{t}</div>
                     ))}
                   </div>
                 </div>
               </div>
             )}
           </div>
-          
+
           {/* New Color Tool */}
           <div className="relative">
             <button
@@ -132,14 +133,14 @@ export default function ToolBar({ setActiveToolProp,setColor, setStroke ,setiser
             {(activeTool === 'shapes' || activeTool === 'rectangle') && (
               <div className="absolute top-1/2 -right-2 -translate-y-1/2 translate-x-full bg-gray-800 p-3 rounded-lg shadow-xl text-white flex gap-2 transition-all duration-200">
                 {/* Rectangle Button - IMPORTANT: onClick uses handleSubToolClick('rectangle') */}
-                <button 
-                  onClick={() => handleSubToolClick('rectangle')} 
+                <button
+                  onClick={() => handleSubToolClick('rectangle')}
                   className={`p-2 rounded-md transition-colors duration-200 ${activeTool === 'rectangle' ? 'bg-gray-600' : 'hover:bg-gray-700'}`}
                   title="Rectangle"
                 >
                   <FaRegSquare size={20} />
                 </button>
-                <button  onClick={() => handleSubToolClick('circle')} 
+                <button onClick={() => handleSubToolClick('circle')}
                   className={`p-2 rounded-md transition-colors duration-200 ${activeTool === 'circle' ? 'bg-gray-600' : 'hover:bg-gray-700'}`}
                   title="Circle"><FaRegCircle size={20} /></button>
                 <button className="p-2 rounded-md hover:bg-gray-700" title="Line"><FaMinus size={20} /></button>
@@ -152,21 +153,23 @@ export default function ToolBar({ setActiveToolProp,setColor, setStroke ,setiser
             <button
               onClick={() => {
                 setColor("white")
-              setStroke(15)}}
+                setStroke(15)
+              }}
               className={`p-3 rounded-lg transition-colors duration-200 ${activeTool === 'eraser' ? 'bg-gray-700' : 'hover:bg-gray-700'}`}
               title="Eraser"
             >
-              <FaEraser size={20} onClick={()=>{setiserasing(!iserasing)
+              <FaEraser size={20} onClick={() => {
+                setiserasing(!iserasing)
                 handleToolClick("eraser")
               }} className="text-gray-300 hover:text-white" />
             </button>
             {color === 'white' && (
               <div className="absolute top-1/2 -right-2 -translate-y-1/2 translate-x-full bg-gray-800 p-3 rounded-lg shadow-xl text-white transition-all duration-200">
-               <div>
+                <div>
                   <h4 className="text-xs font-semibold mb-1">Thickness</h4>
                   <div className="flex gap-2 mb-2">
                     {eraser_thicknesses.map((t) => (
-                      <div key={t} onClick={() => setStroke(t)}className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-xs cursor-pointer hover:bg-gray-500">{t}</div>
+                      <div key={t} onClick={() => setStroke(t)} className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-xs cursor-pointer hover:bg-gray-500">{t}</div>
                     ))}
                   </div>
                 </div>
@@ -177,15 +180,18 @@ export default function ToolBar({ setActiveToolProp,setColor, setStroke ,setiser
           <div className="w-8 h-px bg-gray-700 my-2"></div>
 
           {/* Action Buttons */}
-          <button onClick={handleActionClick} className="p-3 rounded-lg hover:bg-red-600 transition-colors duration-200" title="Clear All">
+          <button onClick={()=>handleToolClick("clearall")} className="p-3 rounded-lg hover:bg-red-600 transition-colors duration-200" title="Clear All">
             <FaTrash size={20} className="text-red-400 hover:text-white" />
           </button>
+          <button onClick={()=>handleToolClick("clearone")} className="p-3 rounded-lg hover:bg-red-600 transition-colors duration-200" title="Clear One">
+            <FaTimes size={20} className="text-red-400 hover:text-white" />
+          </button>
 
-          <button onClick={handleActionClick} className="p-3 rounded-lg hover:bg-gray-700 transition-colors duration-200" title="Undo">
+          <button onClick={()=>handleToolClick("undo")} className="p-3 rounded-lg hover:bg-gray-700 transition-colors duration-200" title="Undo">
             <FaUndo size={20} className="text-gray-300 hover:text-white" />
           </button>
 
-          <button onClick={handleActionClick} className="p-3 rounded-lg hover:bg-gray-700 transition-colors duration-200" title="Redo">
+          <button onClick={()=>handleToolClick("redo")} className="p-3 rounded-lg hover:bg-gray-700 transition-colors duration-200" title="Redo">
             <FaRedo size={20} className="text-gray-300 hover:text-white" />
           </button>
         </div>

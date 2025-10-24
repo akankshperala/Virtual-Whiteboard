@@ -13,6 +13,10 @@ export default function Page() {
   const [color, setColor] = useState("black")
   const [stroke, setStroke] = useState(2)
   const [iserasing, setiserasing] = useState(true)
+  const [isundo, setisundo] = useState(true)
+  const [isredo, setisredo] = useState(true)
+  const [isclearone, setisclearone] = useState(true)
+  const [isclearall, setisclearall] = useState(true)
 
   return (
     <div className="w-screen h-screen relative overflow-hidden bg-amber-100">
@@ -32,11 +36,11 @@ export default function Page() {
           <TopBar />
 
           {/* Whiteboard - Pass activeTool state */}
-          <WhiteboardCanvas activeTool={activeTool} color={color} stroke={stroke} iserasing={iserasing}/>
+          <WhiteboardCanvas setActiveTool={setActiveTool} activeTool={activeTool} color={color} stroke={stroke} />
 
           {/* Toolbar - Pass setter function to update active tool state */}
          
-          <ToolBar isMenuOpen={isMenuOpen} setColor={setColor} setStroke={setStroke} setiserasing={setiserasing} iserasing={iserasing} setActiveToolProp={setActiveTool} color={color}/>
+          <ToolBar setisundo={setisundo} setisredo={setisredo} isclearone={setisclearone} setisclearall={setisclearall} isMenuOpen={isMenuOpen} setColor={setColor} setStroke={setStroke} setiserasing={setiserasing} iserasing={iserasing} setActiveToolProp={setActiveTool} color={color}/>
 
         </div>
       </div>

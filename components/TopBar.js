@@ -1,7 +1,8 @@
 'use client';
 
+import { signOut } from 'next-auth/react';
 import { useState } from 'react';
-import { FaSave, FaDownload, FaShare, FaPlay } from 'react-icons/fa';
+import { FaSave, FaDownload, FaShare, FaPlay, FaSignOutAlt } from 'react-icons/fa';
 import { FiMoreVertical } from 'react-icons/fi';
 
 export default function TopBar() {
@@ -36,6 +37,9 @@ export default function TopBar() {
         <button className={buttonClass}>
           <FaPlay size={14} className={iconClass} />
         </button>
+        <button className={buttonClass} onClick={()=>{signOut()}}>
+          <FaSignOutAlt size={14} className={iconClass} />
+        </button>
       </div>
 
       {/* Mobile Dropdown */}
@@ -61,9 +65,12 @@ export default function TopBar() {
             <button className={buttonClass}>
               <FaPlay size={14} className={iconClass} /> <span className="ml-2">Play Mode</span>
             </button>
+            <button className={buttonClass} onClick={()=>signOut()}>
+            <FaSignOutAlt size={14} className={iconClass} /> <span className="ml-2">Sign Out</span>
+          </button>
           </div>
         )}
-      </div>
     </div>
+    </div >
   );
 }

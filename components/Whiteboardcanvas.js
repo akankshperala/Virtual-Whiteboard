@@ -2,7 +2,7 @@
 import { useEffect, useRef } from "react";
 import { addstrokes, getstrokes, updateStrokes } from "@/app/actions/useractions";
 
-export default function WhiteboardCanvas({ activeTool, color, stroke }) {
+export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stroke }) {
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
 
@@ -28,7 +28,25 @@ export default function WhiteboardCanvas({ activeTool, color, stroke }) {
 
   const currentProps = useRef({ activeTool, color, stroke });
   useEffect(() => {
+    console.log(activeTool)
+    if (activeTool=="clearone") {
+      clearOne()
+      setActiveTool("pen")
+    }
+    if (activeTool=="clearall"){
+      clearAll()
+      setActiveTool("pen")
+    }
+    if (activeTool=="undo"){
+      undo()
+      setActiveTool("pen")
+    }
+    if (activeTool=="redo"){
+      redo()
+      setActiveTool("pen")
+    }
     currentProps.current = { activeTool, color, stroke };
+
   }, [activeTool, color, stroke]);
 
   const handleRadius = 6;
@@ -525,25 +543,11 @@ export default function WhiteboardCanvas({ activeTool, color, stroke }) {
   // render
   // ---------------------------
   return (
-    <div className="flex flex-col items-center w-full h-full">
+    <div className="flex justify-center items-center w-full h-full">
       <canvas
         ref={canvasRef}
         className="cursor-crosshair border-2 border-gray-400 rounded-lg bg-white"
       />
-      <div className="flex gap-3 mt-3">
-        <button onClick={undo} className="px-3 py-1 bg-gray-200 rounded">
-          Undo (Ctrl+Z)
-        </button>
-        <button onClick={redo} className="px-3 py-1 bg-gray-200 rounded">
-          Redo (Ctrl+Y)
-        </button>
-        <button onClick={clearOne} className="px-3 py-1 bg-gray-200 rounded">
-          Clear One (select a shape first)
-        </button>
-        <button onClick={clearAll} className="px-3 py-1 bg-red-500 text-white rounded">
-          Clear All
-        </button>
-      </div>
     </div>
   );
 }
