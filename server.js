@@ -103,7 +103,10 @@ app.prepare().then(() => {
 
     // ✅ Let Next.js handle everything else
   });
-  server.all("*", (req, res) => handle(req, res));
+// replace your current server.all(...) line with this:
+server.all(/.*/, (req, res) => handle(req, res));
+
+
 
   const PORT = process.env.PORT || 3001;
   httpServer.listen(PORT, () => {
