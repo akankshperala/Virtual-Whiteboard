@@ -1,48 +1,7 @@
-// const express = require("express");
-// const http = require("http");
-// const { Server } = require("socket.io");
-// const next = require("next");
-// const path = require("path");
-
-// const dev = process.env.NODE_ENV !== "production";
-// const app = next({ dev });
-// const handle = app.getRequestHandler();
-
-// app.prepare().then(() => {
-//   const server = express();
-//   const httpServer = http.createServer(server);
-//   const io = new Server(httpServer, {
-//     cors: {
-//       origin: "http://localhost:3000",
-//       methods: ["GET", "POST"],
-//     },
-//   });
-
-//   // ✅ Serve static files
-//   server.use("/_next", express.static(path.join(__dirname, ".next")));
-
-//   // 💬 Socket handlers
-//   io.on("connection", (socket) => {
-//     console.log("🔌 User connected:", socket.id);
-
-//     socket.on("send-message", (data) => {
-//       console.log("💬 Message:", data);
-//       io.emit("receive-message", data);
-//     });
-
-//     socket.on("disconnect", () => {
-//       console.log("❌ Disconnected:", socket.id);
-//     });
-//   });
-
-//   // ✅ Let Next.js handle everything else
-//   server.all("*", (req, res) => handle(req, res));
-
-//   const PORT = process.env.PORT || 3001;
-//   httpServer.listen(PORT, () => {
-//     console.log(`🚀 Server ready at http://localhost:${PORT}`);
-//   });
-// });
+// socket-server.js
+// Custom Next.js + Socket.IO server (CommonJS)
+// Run with: node socket-server.js
+// NOTE: in dev, run your Next dev server via this script (it starts Next internally)
 
 const express = require("express");
 const http = require("http");
@@ -57,61 +16,114 @@ const handle = app.getRequestHandler();
 app.prepare().then(() => {
   const server = express();
   const httpServer = http.createServer(server);
+
+  // Allow socket connections from your client origin(s)
+  const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:3000";
+
   const io = new Server(httpServer, {
     cors: {
-      origin: "http://localhost:3000",
+      origin: CLIENT_ORIGIN,
       methods: ["GET", "POST"],
     },
   });
 
-  // ✅ Serve static files
+  // Serve Next static files (only necessary if you want to serve built files from same server)
   server.use("/_next", express.static(path.join(__dirname, ".next")));
 
+  // Keep an in-memory map of online users (userId -> socketId)
+  // You can expand this to support multiple sockets per user (map userId -> Set(socketIds))
   const onlineUsers = new Map();
 
-  // 💬 Socket handlers
+  // ---------- Socket handlers ----------
   io.on("connection", (socket) => {
-
-    const userId = socket.handshake.auth?.userId;
+    // Prefer auth.userId passed on connect (socket.io client: io(url, { auth: { userId } }))
+    const userId = socket.handshake.auth && socket.handshake.auth.userId;
     if (userId) {
       onlineUsers.set(userId, socket.id);
     }
-    io.emit("online-users", [...onlineUsers.keys()]);
-    console.log("🔌 User connected:", socket.id)
 
+    // Broadcast online users list to all connected clients
+    io.emit("online-users", [...onlineUsers.keys()]);
+    // console.log("🔌 Socket connected:", socket.id, "userId:", userId ?? "<no-userId>");
+
+    // === Whiteboard events ===
+    // When a client creates a stroke, they should include the created stroke object
+    // server will broadcast to all other clients (exclude sender)
+    socket.on("stroke:created", (payload) => {
+      // payload expected: { _id, shape, points, color, size, width?, height?, sourceClient? }
+      // console.error(1111111111)
+      // console.error(payload,"payload")
+      socket.broadcast.emit("stroke:created", payload);
+    });
+
+    // When a client updates a stroke
+    socket.on("stroke:updated", (payload) => {
+      socket.broadcast.emit("stroke:updated", payload);
+    });
+
+    // When a client deletes a stroke (clear one)
+    socket.on("stroke:deleted", (payload) => {
+      // payload expected { _id, sourceClient? }
+      socket.broadcast.emit("stroke:deleted", payload);
+    });
+
+    // When a client clears all strokes
+    socket.on("clear:all", (payload) => {
+      // payload may be { sourceClient? }
+      socket.broadcast.emit("clear:all", payload);
+    });
+    // when a client sends an undo snapshot, broadcast to everyone else
+socket.on("undo", ({ sourceClient, snapshot }) => {
+  // optional: validate snapshot shape here, or check auth
+  socket.broadcast.emit("undo", { sourceClient, snapshot });
+});
+
+// when a client sends a redo snapshot, broadcast to everyone else
+socket.on("redo", ({ sourceClient, snapshot }) => {
+  socket.broadcast.emit("redo", { sourceClient, snapshot });
+});
+
+    // Messaging example you already had (keeps targeted messaging)
     socket.on("send-message", (data) => {
-      console.log("💬 Message:", data);
       const receiverId = data.receiverId;
       const receiverSocketId = onlineUsers.get(receiverId);
 
-      // ✅ Send only to the receiver if they are online
       if (receiverSocketId) {
         io.to(receiverSocketId).emit("receive-message", data);
       }
-
-      // ✅ Optionally also send to sender so they see their own message
+      // Emit to sender as confirmation
       socket.emit("receive-message", data);
-      // io.emit("receive-message", data);
     });
 
-    socket.on("disconnect", () => {
+    // When the socket disconnects, remove from onlineUsers and broadcast update
+    socket.on("disconnect", (reason) => {
       if (userId) {
-        onlineUsers.delete(userId);
+        // Remove the userId mapping only if the same socket id is recorded
+        const recorded = onlineUsers.get(userId);
+        if (recorded === socket.id) {
+          onlineUsers.delete(userId);
+        }
         io.emit("online-users", [...onlineUsers.keys()]);
       }
+      // console.log("❌ Socket disconnected:", socket.id, "reason:", reason);
     });
 
-    // ✅ Let Next.js handle everything else
+    // Optional: a ping/pong keepalive to track liveness
+    socket.on("ping-server", () => socket.emit("pong-server", Date.now()));
   });
-// replace your current server.all(...) line with this:
-server.all(/.*/, (req, res) => handle(req, res));
 
+  // Use a regex route so Express + path-to-regexp don't misinterpret special patterns.
+  // This tells Next to handle every route that wasn't handled above.
+  server.all(/.*/, (req, res) => {
+    return handle(req, res);
+  });
 
-
-  const PORT = process.env.PORT || 3001;
+  const PORT = parseInt(process.env.PORT || "3001", 10);
   httpServer.listen(PORT, () => {
-    console.log(`🚀 Server ready at http://localhost:${PORT}`);
+    console.log(`🚀 Custom Next + Socket.IO server running on http://localhost:${PORT}`);
+    console.log(`   Socket.IO CORS origin: ${CLIENT_ORIGIN}`);
   });
-
-
-})
+}).catch(err => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});

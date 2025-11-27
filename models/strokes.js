@@ -6,6 +6,7 @@ const strokesSchema = new mongoose.Schema({
       shape:String,
       color: String,
       size: Number,
+      radius:Number,
       width: Number,
       height: Number,
       points: [

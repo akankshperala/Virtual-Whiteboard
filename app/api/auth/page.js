@@ -210,7 +210,7 @@ export default function AuthPage() {
                     type="text"
                     placeholder="username"
                     value={username}
-                    onChange={(e) => setUsername(e.target.value)}
+                    onChange={(e) => setusername(e.target.value)}
                     required
                   />
                 </div>

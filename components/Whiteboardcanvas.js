@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { addstrokes, getstrokes, updateStrokes } from "@/app/actions/useractions";
+import { io } from "socket.io-client";
 
-export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stroke }) {
+export default function WhiteboardCanvas({ setActiveTool, activeTool, color, stroke }) {
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
 
@@ -27,24 +28,31 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
   const dragOffset = useRef({ x: 0, y: 0 });
 
   const currentProps = useRef({ activeTool, color, stroke });
+  const socketRef = useRef(null);
+  const localClientId = useRef(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+
+
+
   useEffect(() => {
     console.log(activeTool)
-    if (activeTool=="clearone") {
+    if (activeTool == "clearone") {
       clearOne()
       setActiveTool("pen")
     }
-    if (activeTool=="clearall"){
+    if (activeTool == "clearall") {
       clearAll()
       setActiveTool("pen")
     }
-    if (activeTool=="undo"){
-      undo()
-      setActiveTool("pen")
+    if (activeTool == "undo") {
+      undo();
+      setActiveTool("pen");
     }
-    if (activeTool=="redo"){
-      redo()
-      setActiveTool("pen")
+
+    if (activeTool == "redo") {
+      redo();
+      setActiveTool("pen");
     }
+
     currentProps.current = { activeTool, color, stroke };
 
   }, [activeTool, color, stroke]);
@@ -54,7 +62,7 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
   // ---------------------------
   // Helpers: history tree utils
   // ---------------------------
-  const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+  const newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
   const makeSnapshot = () => ({
     rectangles: JSON.parse(JSON.stringify(rectangles.current)),
@@ -154,15 +162,36 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
     const parentId = cur.parentId;
     if (!parentId) return;
     restoreNode(parentId);
+
+    // If socket exists, broadcast (guards avoid errors)
+    try {
+      if (socketRef.current) {
+        socketRef.current.emit("undo", {
+          sourceClient: localClientId.current,
+          snapshot: makeSnapshot(),
+        });
+      }
+    } catch (e) { console.warn("undo emit failed", e); }
   };
 
   const redo = () => {
     const cur = nodesMap.current[currentNodeId.current];
     if (!cur) return;
-    const childId = cur.childrenIds && cur.childrenIds.length ? cur.childrenIds[cur.childrenIds.length - 1] : null;
+    const childId = cur.childrenIds?.[cur.childrenIds.length - 1];
     if (!childId) return;
     restoreNode(childId);
+
+    try {
+      if (socketRef.current) {
+        socketRef.current.emit("redo", {
+          sourceClient: localClientId.current,
+          snapshot: makeSnapshot(),
+        });
+      }
+    } catch (e) { console.warn("redo emit failed", e); }
   };
+
+
 
   // ---------------------------
   // Drawing helpers / geometry
@@ -254,7 +283,6 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     ctxRef.current = ctx;
-
     const resizeCanvas = () => {
       canvas.width = Math.floor(window.innerWidth * 0.9);
       canvas.height = Math.floor(window.innerHeight * 0.8);
@@ -263,10 +291,162 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
 
+    socketRef.current = io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001", {
+      transports: ["websocket"],
+      // optionally send auth user id:
+      // auth: { userId: currentUserId || null }
+    });
+    socketRef.current.on("stroke:created", (stroke) => {
+      try {
+        if (!stroke) return;
+        if (stroke.sourceClient === localClientId.current) return; // ignore our own broadcast
+
+        // dedupe by _id
+        if (stroke._id && (penStrokes.current.find(s => s._id === stroke._id) || rectangles.current.find(r => r._id === stroke._id) || circles.current.find(c => c._id === stroke._id))) {
+          return;
+        }
+
+        if (stroke.shape === "rectangle") {
+          rectangles.current.push({
+            x: stroke.points?.[0]?.x ?? 0,
+            y: stroke.points?.[0]?.y ?? 0,
+            width: stroke.width || 0,
+            height: stroke.height || 0,
+            _id: stroke._id,
+            color: stroke.color,
+            size: stroke.size,
+          });
+        } else if (stroke.shape === "circle") {
+          console.log(stroke, "strpok")
+          circles.current.push({
+            x: stroke.points?.[0]?.x ?? 0,
+            y: stroke.points?.[0]?.y ?? 0,
+            radius: stroke.radius || 0,
+            _id: stroke._id,
+            color: stroke.color,
+            size: stroke.size,
+          });
+        } else {
+          penStrokes.current.push({
+            arr: stroke.points || [],
+            _id: stroke._id,
+            color: stroke.color,
+            size: stroke.size,
+          });
+        }
+
+        // update local history if you want remote changes to be undoable locally:
+        saveState(false);
+        draw();
+      } catch (e) { console.error(e); }
+    });
+
+    socketRef.current.on("stroke:updated", (stroke) => {
+      try {
+        // ignore our own broadcasts
+        console.log(4)
+        if (stroke.sourceClient === localClientId.current) return;
+
+        // normalise incoming points (support older 'arr' too)
+        const pts = stroke.points || stroke.arr || [];
+
+        // rectangles
+        const r = rectangles.current.find(x => x._id === stroke._id);
+        console.log(r, "r")
+        console.log(stroke)
+        if (r) {
+          r.x = pts[0]?.x ?? r.x;
+          r.y = pts[0]?.y ?? r.y;
+          r.width = stroke.width ?? r.width;
+          r.height = stroke.height ?? r.height;
+          // keep optional stored points too
+          r.points = pts.length ? pts : r.points;
+          saveState(false);
+          console.log(r)
+          draw();
+          return;
+        }
+
+        // circles
+        const c = circles.current.find(x => x._id === stroke._id);
+        if (c) {
+          c.x = pts[0]?.x ?? c.x;
+          c.y = pts[0]?.y ?? c.y;
+          // compute radius from pts if server didn't send radius
+          c.radius = stroke.radius ?? (pts[1] ? Math.hypot(pts[1].x - (pts[0]?.x ?? c.x), pts[1].y - (pts[0]?.y ?? c.y)) : c.radius);
+          c.points = pts.length ? pts : c.points;
+          saveState(false);
+          // console.log(c)
+          draw();
+          return;
+        }
+
+        // pen strokes (freehand)
+        const p = penStrokes.current.find(x => x._id === stroke._id);
+        if (p) {
+          p.arr = pts.length ? pts : p.arr || []; // keep using p.arr in drawing code
+          saveState(false);
+          draw();
+          return;
+        }
+
+      } catch (e) {
+        console.error("socket stroke:updated handler error", e);
+      }
+    });
+
+    socketRef.current.on("stroke:deleted", ({ _id, sourceClient }) => {
+      if (sourceClient === localClientId.current) return;
+      rectangles.current = rectangles.current.filter(r => r._id !== _id);
+      circles.current = circles.current.filter(c => c._id !== _id);
+      penStrokes.current = penStrokes.current.filter(p => p._id !== _id);
+      saveState(false);
+      draw();
+    });
+
+    // Receive UNDO from another user
+    socketRef.current.on("undo", ({ sourceClient, snapshot }) => {
+      // console.error(0)
+      if (sourceClient === localClientId.current) return;
+
+      // overwrite shapes
+      rectangles.current = snapshot.rectangles || [];
+      circles.current = snapshot.circles || [];
+      penStrokes.current = snapshot.penStrokes || [];
+
+      // reset history so undo works cleanly again
+      initHistory(snapshot);
+
+      draw();
+    });
+
+    socketRef.current.on("redo", ({ sourceClient, snapshot }) => {
+      if (sourceClient === localClientId.current) return;
+
+      rectangles.current = snapshot.rectangles || [];
+      circles.current = snapshot.circles || [];
+      penStrokes.current = snapshot.penStrokes || [];
+
+      initHistory(snapshot);
+
+      draw();
+    });
+
+
+    socketRef.current.on("clear:all", ({ sourceClient }) => {
+
+      if (sourceClient === localClientId.current) return;
+      rectangles.current = []; circles.current = []; penStrokes.current = [];
+      // reinit history root to current empty state so undo does nothing
+      initHistory(makeSnapshot());
+      draw();
+    });
+
     // restore strokes from backend
     (async () => {
       try {
         const points = await getstrokes();
+        console.log(points)
         if (Array.isArray(points) && points.length) {
           points.forEach((stroke) => {
             try {
@@ -300,20 +480,27 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
             } catch (e) {
               console.warn("skip stroke:", e);
             }
+            console.log(stroke,rectangles,circles,penStrokes)
           });
         }
       } catch (err) {
         console.error("load strokes error", err);
       } finally {
+        // prefer server-authoritative snapshot on every fresh page load
+        // prefer restoring local undo/redo history if present, otherwise init from server snapshot
         const restored = restoreHistoryFromLocal();
         if (restored && currentNodeId.current) {
+          // restore to the node the user had last
           restoreNode(currentNodeId.current);
         } else {
           const initialSnap = makeSnapshot();
           initHistory(initialSnap);
           draw();
         }
+
+
       }
+      console.log(rectangles,circles,penStrokes)
     })();
 
     // --- mouse & keyboard ---
@@ -421,39 +608,47 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
       isDrawing.current = false;
       isDragging.current = false;
       isResizing.current = false;
-
+      // console.log("hi")
       if (wasDrawing) {
         const cur = penStrokes.current[penStrokes.current.length - 1];
         const points = cur?.arr || [];
         if (points.length > 0) {
           try {
+            // console.log(77777777777)
             const res = await addstrokes({
               shape: "pen",
               color: cur.color,
               size: cur.size,
               arr: points,
             });
-            if (res?._id) cur._id = res._id;
+            if (res?._id) {
+              cur._id = res._id;
+              socketRef.current?.emit("stroke:created", { ...res, sourceClient: localClientId.current });
+            }
           } catch (err) {
             console.error("save pen error", err);
           }
         }
       }
-
+      console.log(lastSelected.current, "oloko")
       if (lastSelected.current) {
         const s = lastSelected.current;
+        // console.log(s,"sss")
         try {
           if (rectangles.current.includes(s)) {
             if (s._id) {
-              await updateStrokes(s._id, {
+              const updated = await updateStrokes(s._id, {
                 shape: "rectangle",
                 color: s.color || "black",
-                arr: [{ x: s.x, y: s.y }],
+                points: [{ x: s.x, y: s.y }],   // <-- match backend field (points or arr)
                 width: s.width,
                 height: s.height,
                 type: "rectangle",
               });
+              socketRef.current?.emit("stroke:updated", { ...(updated || { _id: s._id }), sourceClient: localClientId.current });
+
             } else {
+
               const res = await addstrokes({
                 shape: "rectangle",
                 color: s.color || "black",
@@ -462,24 +657,38 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
                 height: s.height,
                 type: "rectangle",
               });
-              if (res?._id) s._id = res._id;
+              if (res?._id) {
+                s._id = res._id;
+                socketRef.current?.emit("stroke:created", { ...res, sourceClient: localClientId.current });
+              }
             }
           } else if (circles.current.includes(s)) {
+            console.log(s, "sss")
             const arrPts = [{ x: s.x, y: s.y }, { x: s.x + (s.radius || 0), y: s.y }];
             if (s._id) {
-              await updateStrokes(s._id, {
+              const updated = await updateStrokes(s._id, {
                 shape: "circle",
                 color: s.color || "black",
-                arr: arrPts,
+                points: arrPts,
+                radius: s.radius,
+                type: "circle",
               });
+              socketRef.current?.emit("stroke:updated", { ...(updated || { _id: s._id }), sourceClient: localClientId.current });
+
             } else {
+
               const res = await addstrokes({
                 shape: "circle",
                 color: s.color || "black",
                 arr: arrPts,
                 type: "circle",
+                radius: s.radius
               });
-              if (res?._id) s._id = res._id;
+              // console.log(s,res,"kmkkl")
+              if (res?._id) {
+                s._id = res._id;
+                socketRef.current?.emit("stroke:created", { ...res, sourceClient: localClientId.current });
+              }
             }
           }
         } catch (err) {
@@ -513,6 +722,16 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
       canvas.removeEventListener("mousemove", handleMouseMove);
       canvas.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("keydown", handleKey);
+      // cleanup at end of useEffect
+      if (socketRef.current) {
+        socketRef.current.off("stroke:created");
+        socketRef.current.off("stroke:updated");
+        socketRef.current.off("stroke:deleted");
+        socketRef.current.off("clear:all");
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+
     };
   }, []);
 
@@ -528,6 +747,9 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
     lastSelected.current = null;
     saveState(true);
     draw();
+    if (sel._id) {
+      socketRef.current?.emit("stroke:deleted", { _id: sel._id, sourceClient: localClientId.current });
+    }
   };
 
   const clearAll = () => {
@@ -535,9 +757,13 @@ export default function WhiteboardCanvas({ setActiveTool,activeTool, color, stro
     circles.current = [];
     penStrokes.current = [];
     lastSelected.current = null;
-    saveState(true);
+    // re-init history root so undo does nothing until user draws again
+    initHistory(makeSnapshot());
     draw();
+    // broadcast to other clients
+    socketRef.current?.emit("clear:all", { sourceClient: localClientId.current });
   };
+
 
   // ---------------------------
   // render

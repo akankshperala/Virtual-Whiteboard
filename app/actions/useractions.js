@@ -88,7 +88,6 @@ import mongoose from "mongoose";
 // --- ADD STROKES ---
 export const addstrokes = async (data) => {
   await connectdb();
-
   const wb = new Strokes({
     strokes: [
       {
@@ -98,6 +97,7 @@ export const addstrokes = async (data) => {
         points: data.arr,
         width:data.width,
         height:data.height,
+        radius:data.radius
       },
     ],
   });
@@ -112,6 +112,7 @@ export const addstrokes = async (data) => {
     color: stroke.color || "black",
     size: stroke.size || 5,
     points: stroke.points.map((pt) => ({ x: pt.x, y: pt.y })),
+    radius:stroke.radius,
     width:stroke.width || 0,
     height:stroke.height || 0,
 
@@ -152,21 +153,26 @@ export async function updateStrokes(id, updatedData) {
           "strokes.0.shape": updatedData.shape,
           "strokes.0.color": updatedData.color,
           "strokes.0.size": updatedData.size || 5,
-          "strokes.0.points": updatedData.arr,
+          "strokes.0.points": updatedData.points,
            "strokes.0.width":updatedData.width || 0,
             "strokes.0.height":updatedData.height || 0,
+            "strokes.0.radius":updatedData.radius || 0,
+
         },
       },
       { new: true }
     ).lean();
-
     if (!updated) return null;
     const stroke = updated.strokes[0];
+    console.log(updatedData,"updatedData")
     return {
       _id: updated._id.toString(),
       shape: stroke.shape,
       color: stroke.color,
       size: stroke.size,
+      radius:stroke.radius,
+      width:stroke.width,
+      height:stroke.height,
        points: stroke.points.map(pt => ({ x: pt.x, y: pt.y })),
     };
   } catch (err) {
