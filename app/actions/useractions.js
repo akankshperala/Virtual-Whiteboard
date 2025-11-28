@@ -189,9 +189,20 @@ export async function deleteStroke(id) {
     const deleted = await Strokes.findOneAndDelete({ _id: objectId }).lean();
     if (!deleted) return null;
 
-    return { _id: deleted._id.toString(), ...deleted };
+    // return { _id: deleted._id.toString(), ...deleted };
   } catch (err) {
     console.error("Error deleting stroke:", err);
     return null;
+  }
+}
+
+export async function clearAllStrokes() {
+  await connectdb();
+  try {
+    const result = await Strokes.deleteMany({});
+    return { success: true, deleted: result.deletedCount };
+  } catch (err) {
+    console.error("Error clearing all strokes:", err);
+    return { success: false, error: "Failed to clear all strokes" };
   }
 }

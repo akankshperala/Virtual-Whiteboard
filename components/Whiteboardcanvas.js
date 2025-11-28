@@ -1,16 +1,19 @@
 "use client";
-import { useEffect, useRef } from "react";
-import { addstrokes, getstrokes, updateStrokes } from "@/app/actions/useractions";
+import { useEffect, useRef, useState } from "react";
+import { addstrokes, clearAllStrokes, deleteStroke, getstrokes, updateStrokes } from "@/app/actions/useractions";
 import { io } from "socket.io-client";
+import { useSession } from "next-auth/react";
 
 export default function WhiteboardCanvas({ setActiveTool, activeTool, color, stroke }) {
   const canvasRef = useRef(null);
+  const {data:session,status}=useSession()
   const ctxRef = useRef(null);
 
   // shape storage
   const rectangles = useRef([]);
   const circles = useRef([]);
   const penStrokes = useRef([]);
+  const [loading, setLoading] = useState(true)
 
   // selection
   const currentShape = useRef(null); // used while interacting
@@ -30,7 +33,116 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
   const currentProps = useRef({ activeTool, color, stroke });
   const socketRef = useRef(null);
   const localClientId = useRef(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+  /* Loader UI (Tailwind) */
+function FullscreenLoader({ message = "Loading whiteboard..." }) {
+  return (
+    <div className="fancy-loader-root" role="status" aria-live="polite" aria-busy="true">
+      <div className="loader" aria-hidden="true"></div>
+      <div className="sr-only">{message}</div>
 
+      <style jsx>{`
+        .fancy-loader-root {
+          position: absolute;
+          inset: 0;
+          z-index: 60;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(255,255,255,0.85);
+          backdrop-filter: blur(6px);
+        }
+
+        /* copy of your loader CSS adapted for styled-jsx */
+        .loader {
+          --w: 10ch;
+          font-weight: bold;
+          font-family: monospace;
+          font-size: 30px;
+          letter-spacing: var(--w);
+          width: var(--w);
+          overflow: hidden;
+          white-space: nowrap;
+          color: #0000; /* make text transparent, visuals via text-shadow */
+          animation: l40 2s infinite;
+        }
+        .loader:before {
+          content: "Loading...";
+        }
+
+        @keyframes l40 {
+          0%,100% {
+           text-shadow:
+                calc( 0*var(--w)) 0 #000,calc(-1*var(--w)) 0 #000,calc(-2*var(--w)) 0 #000,calc(-3*var(--w)) 0 #000,calc(-4*var(--w)) 0 #000,
+                calc(-5*var(--w)) 0 #000,calc(-6*var(--w)) 0 #000,calc(-7*var(--w)) 0 #000,calc(-8*var(--w)) 0 #000,calc(-9*var(--w)) 0 #000;
+          }
+          9% {
+           text-shadow:
+                calc( 0*var(--w)) 0 #000,calc(-1*var(--w)) 0 #000,calc(-2*var(--w)) -20px #0000,calc(-3*var(--w)) 0 #000,calc(-4*var(--w)) 0 #000,
+                calc(-5*var(--w)) 0 #000,calc(-6*var(--w)) 0 #000,calc(-7*var(--w)) 0 #000,calc(-8*var(--w)) 0 #000,calc(-9*var(--w)) 0 #000;
+          }
+          18% {
+           text-shadow:
+                calc( 0*var(--w)) 0 #000,calc(-1*var(--w)) 0 #000,calc(-2*var(--w)) -20px #0000,calc(-3*var(--w)) 0 #000,calc(-4*var(--w)) 0 #000,
+                calc(-5*var(--w)) 0 #000,calc(-6*var(--w)) -20px #0000,calc(-7*var(--w)) 0 #000,calc(-8*var(--w)) 0 #000,calc(-9*var(--w)) 0 #000;
+          }
+          27% {
+           text-shadow:
+                calc( 0*var(--w)) -20px #0000,calc(-1*var(--w)) 0 #000,calc(-2*var(--w)) -20px #0000,calc(-3*var(--w)) 0 #000,calc(-4*var(--w)) 0 #000,
+                calc(-5*var(--w)) 0 #000,calc(-6*var(--w)) -20px #0000,calc(-7*var(--w)) 0 #000,calc(-8*var(--w)) 0 #000,calc(-9*var(--w)) 0 #000;
+          }
+          36% {
+           text-shadow:
+                calc( 0*var(--w)) -20px #0000,calc(-1*var(--w)) 0 #000,calc(-2*var(--w)) -20px #0000,calc(-3*var(--w)) 0 #000,calc(-4*var(--w)) 0 #000,
+                calc(-5*var(--w)) -20px #0000,calc(-6*var(--w)) -20px #0000,calc(-7*var(--w)) 0 #000,calc(-8*var(--w)) 0 #000,calc(-9*var(--w)) 0 #000;
+          }
+          45% {
+           text-shadow:
+                calc( 0*var(--w)) -20px #0000,calc(-1*var(--w)) 0 #000,calc(-2*var(--w)) -20px #0000,calc(-3*var(--w)) 0 #000,calc(-4*var(--w)) 0 #000,
+                calc(-5*var(--w)) -20px #0000,calc(-6*var(--w)) -20px #0000,calc(-7*var(--w)) 0 #000,calc(-8*var(--w)) -20px #0000,calc(-9*var(--w)) 0 #000;
+          }
+          54% {
+           text-shadow:
+                calc( 0*var(--w)) -20px #0000,calc(-1*var(--w)) 0 #000,calc(-2*var(--w)) -20px #0000,calc(-3*var(--w)) 0 #000,calc(-4*var(--w)) -20px #0000,
+                calc(-5*var(--w)) -20px #0000,calc(-6*var(--w)) -20px #0000,calc(-7*var(--w)) 0 #000,calc(-8*var(--w)) -20px #0000,calc(-9*var(--w)) 0 #000;
+          }
+          63% {
+           text-shadow:
+                calc( 0*var(--w)) -20px #0000,calc(-1*var(--w)) 0 #000,calc(-2*var(--w)) -20px #0000,calc(-3*var(--w)) 0 #000,calc(-4*var(--w)) -20px #0000,
+                calc(-5*var(--w)) -20px #0000,calc(-6*var(--w)) -20px #0000,calc(-7*var(--w)) 0 #000,calc(-8*var(--w)) -20px #0000,calc(-9*var(--w)) -20px #0000;
+          }
+          72% {
+           text-shadow:
+                calc( 0*var(--w)) -20px #0000,calc(-1*var(--w)) -20px #0000,calc(-2*var(--w)) -20px #0000,calc(-3*var(--w)) 0 #000,calc(-4*var(--w)) -20px #0000,
+                calc(-5*var(--w)) -20px #0000,calc(-6*var(--w)) -20px #0000,calc(-7*var(--w)) 0 #000,calc(-8*var(--w)) -20px #0000,calc(-9*var(--w)) -20px #0000;
+          }
+          81% {
+           text-shadow:
+                calc( 0*var(--w)) -20px #0000,calc(-1*var(--w)) -20px #0000,calc(-2*var(--w)) -20px #0000,calc(-3*var(--w)) 0 #000,calc(-4*var(--w)) -20px #0000,
+                calc(-5*var(--w)) -20px #0000,calc(-6*var(--w)) -20px #0000,calc(-7*var(--w)) -20px #0000,calc(-8*var(--w)) -20px #0000,calc(-9*var(--w)) -20px #0000;
+          }
+          90% {
+           text-shadow:
+                calc( 0*var(--w)) -20px #0000,calc(-1*var(--w)) -20px #0000,calc(-2*var(--w)) -20px #0000,calc(-3*var(--w)) -20px #0000,calc(-4*var(--w)) -20px #0000,
+                calc(-5*var(--w)) -20px #0000,calc(-6*var(--w)) -20px #0000,calc(-7*var(--w)) -20px #0000,calc(-8*var(--w)) -20px #0000,calc(-9*var(--w)) -20px #0000;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+
+
+  useEffect(() => {
+    if (status=="loading"){
+      setLoading(true)
+    }
+    else{
+      setLoading(false)
+    }
+  
+  }, [status])
+  
 
 
   useEffect(() => {
@@ -70,126 +182,332 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
     penStrokes: JSON.parse(JSON.stringify(penStrokes.current)),
   });
 
-  const persistHistoryToLocal = () => {
+// --- no-op local persistence (keeps other code calling these safe) ---
+const persistHistoryToLocal = () => {
+  // intentionally left blank — history is in-memory only now
+};
+
+const restoreHistoryFromLocal = () => {
+  // intentionally return false to indicate no local history present
+  return false;
+};
+
+const initHistory = (initialSnapshot) => {
+  const rootId = newId();
+  const node = {
+    id: rootId,
+    parentId: null,
+    childrenIds: [],
+    snapshot: initialSnapshot,
+    createdAt: Date.now(),
+  };
+  nodesMap.current = { [rootId]: node };
+  historyRoot.current = node;
+  currentNodeId.current = rootId;
+  // no local persistence
+};
+
+const saveState = (fromUser = true) => {
+  const snap = makeSnapshot();
+  const id = newId();
+  const parentId = currentNodeId.current;
+  const node = {
+    id,
+    parentId,
+    childrenIds: [],
+    snapshot: snap,
+    createdAt: Date.now(),
+  };
+  nodesMap.current[id] = node;
+  if (parentId && nodesMap.current[parentId]) {
+    nodesMap.current[parentId].childrenIds.push(id);
+  }
+  currentNodeId.current = id;
+  // no local persistence
+};
+
+const restoreNode = (nodeId) => {
+  const node = nodesMap.current[nodeId];
+  if (!node || !node.snapshot) return;
+  rectangles.current = JSON.parse(JSON.stringify(node.snapshot.rectangles || []));
+  circles.current = JSON.parse(JSON.stringify(node.snapshot.circles || []));
+  penStrokes.current = JSON.parse(JSON.stringify(node.snapshot.penStrokes || []));
+  currentNodeId.current = nodeId;
+  draw();
+  // no local persistence
+};
+
+function findRemoved(prev, next) {
+  const prevAll = [
+    ...(prev.rectangles || []),
+    ...(prev.circles || []),
+    ...(prev.penStrokes || [])
+  ];
+
+  const nextAll = [
+    ...(next.rectangles || []),
+    ...(next.circles || []),
+    ...(next.penStrokes || [])
+  ];
+
+  // Find a shape that existed before but not after
+  const removed = prevAll.find(
+    p => !nextAll.some(n => n === p || (n._id && p._id && n._id === p._id))
+  );
+
+  return removed || null;
+}
+function findAdded(prev, next) {
+  const prevAll = [
+    ...(prev.rectangles || []),
+    ...(prev.circles || []),
+    ...(prev.penStrokes || [])
+  ];
+
+  const nextAll = [
+    ...(next.rectangles || []),
+    ...(next.circles || []),
+    ...(next.penStrokes || [])
+  ];
+
+  // Find a shape that appears in next but not before
+  const added = nextAll.find(
+    n => !prevAll.some(p => p === n || (p._id && n._id && p._id === n._id))
+  );
+
+  return added || null;
+}
+
+function shallowShapeEquals(a, b) {
+  if (!a || !b) return false;
+  // Compare relevant fields for shapes
+  const ka = {
+    x: a.x, y: a.y, width: a.width, height: a.height, radius: a.radius,
+    color: a.color, size: a.size,
+    arr: Array.isArray(a.arr) ? a.arr : (Array.isArray(a.points) ? a.points : []),
+  };
+  const kb = {
+    x: b.x, y: b.y, width: b.width, height: b.height, radius: b.radius,
+    color: b.color, size: b.size,
+    arr: Array.isArray(b.arr) ? b.arr : (Array.isArray(b.points) ? b.points : []),
+  };
+  try {
+    return JSON.stringify(ka) === JSON.stringify(kb);
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Returns array of { prevShape, nextShape } where same _id but changed
+ */
+function findUpdated(prev, next) {
+  const prevAll = [
+    ...(prev.rectangles || []),
+    ...(prev.circles || []),
+    ...(prev.penStrokes || [])
+  ];
+  const nextAll = [
+    ...(next.rectangles || []),
+    ...(next.circles || []),
+    ...(next.penStrokes || [])
+  ];
+
+  const prevById = new Map(prevAll.filter(s => s && s._id).map(s => [String(s._id), s]));
+  const updated = [];
+
+  for (const n of nextAll) {
+    if (!n || !n._id) continue;
+    const id = String(n._id);
+    const p = prevById.get(id);
+    if (p && !shallowShapeEquals(p, n)) {
+      updated.push({ prev: p, next: n });
+    }
+  }
+  return updated;
+}
+
+
+const undo = async () => {
+  const cur = nodesMap.current[currentNodeId.current];
+  if (!cur) return;
+  const parentId = cur.parentId;
+  if (!parentId) return;
+
+  // snapshot before undo
+  const prev = makeSnapshot();
+
+  // restore target snapshot (after undo)
+  restoreNode(parentId);
+
+  // snapshot after undo
+  const next = makeSnapshot();
+
+  // FIND REMOVED SHAPE
+  const removed = findRemoved(prev, next);
+
+  // DELETE ONLY THAT SHAPE IN DB
+  if (removed && removed._id) {
     try {
-      const payload = {
-        nodes: Object.values(nodesMap.current).map((n) => ({
-          id: n.id,
-          parentId: n.parentId,
-          childrenIds: n.childrenIds,
-          snapshot: n.snapshot,
-          createdAt: n.createdAt,
-        })),
-        currentId: currentNodeId.current,
-      };
-      localStorage.setItem("wb_history_tree", JSON.stringify(payload));
+      await deleteStroke(removed._id);
     } catch (e) {
-      console.warn("persistHistory failed", e);
+      console.log("Failed to delete from DB:", e);
     }
-  };
+  }
 
-  const restoreHistoryFromLocal = () => {
+  // FIND UPDATED SHAPES (moved / resized / color / size changes)
+  const updatedPairs = findUpdated(prev, next);
+  for (const { next: nextShape } of updatedPairs) {
+    if (!nextShape || !nextShape._id) continue;
+    const payload = {};
+    // shape type
+    if (typeof nextShape.radius === "number") {
+      payload.shape = "circle";
+      payload.points = [{ x: nextShape.x, y: nextShape.y }, { x: nextShape.x + (nextShape.radius || 0), y: nextShape.y }];
+      payload.radius = nextShape.radius;
+    } else if (typeof nextShape.width === "number" || typeof nextShape.height === "number") {
+      payload.shape = "rectangle";
+      payload.points = [{ x: nextShape.x, y: nextShape.y }];
+      payload.width = nextShape.width;
+      payload.height = nextShape.height;
+    } else {
+      payload.shape = "pen";
+      payload.points = nextShape.arr || nextShape.points || [];
+    }
+    if (typeof nextShape.color !== "undefined") payload.color = nextShape.color;
+    if (typeof nextShape.size !== "undefined") payload.size = nextShape.size;
+
     try {
-      const raw = localStorage.getItem("wb_history_tree");
-      if (!raw) return false;
-      const payload = JSON.parse(raw);
-      nodesMap.current = {};
-      payload.nodes.forEach((n) => {
-        nodesMap.current[n.id] = {
-          id: n.id,
-          parentId: n.parentId,
-          childrenIds: n.childrenIds || [],
-          snapshot: n.snapshot,
-          createdAt: n.createdAt,
-        };
-      });
-      currentNodeId.current = payload.currentId || Object.keys(nodesMap.current)[0] || null;
-      return true;
+      await updateStrokes(String(nextShape._id), payload);
     } catch (e) {
-      console.warn("restoreHistory failed", e);
-      return false;
+      console.warn("updateStrokes failed (undo) for", nextShape._id, e);
     }
-  };
+  }
 
-  const initHistory = (initialSnapshot) => {
-    const rootId = newId();
-    const node = {
-      id: rootId,
-      parentId: null,
-      childrenIds: [],
-      snapshot: initialSnapshot,
-      createdAt: Date.now(),
-    };
-    nodesMap.current = { [rootId]: node };
-    historyRoot.current = node;
-    currentNodeId.current = rootId;
-    persistHistoryToLocal();
-  };
+  // BROADCAST UNDO
+  try {
+    socketRef.current?.emit("undo", {
+      sourceClient: localClientId.current,
+      snapshot: next,
+    });
+  } catch (e) {
+    console.warn("undo emit failed", e);
+  }
+};
 
-  const saveState = (fromUser = true) => {
-    const snap = makeSnapshot();
-    const id = newId();
-    const parentId = currentNodeId.current;
-    const node = {
-      id,
-      parentId,
-      childrenIds: [],
-      snapshot: snap,
-      createdAt: Date.now(),
-    };
-    nodesMap.current[id] = node;
-    if (parentId && nodesMap.current[parentId]) {
-      nodesMap.current[parentId].childrenIds.push(id);
-    }
-    currentNodeId.current = id;
-    persistHistoryToLocal();
-  };
+const redo = async () => {
+  const cur = nodesMap.current[currentNodeId.current];
+  if (!cur) return;
 
-  const restoreNode = (nodeId) => {
-    const node = nodesMap.current[nodeId];
-    if (!node || !node.snapshot) return;
-    rectangles.current = JSON.parse(JSON.stringify(node.snapshot.rectangles || []));
-    circles.current = JSON.parse(JSON.stringify(node.snapshot.circles || []));
-    penStrokes.current = JSON.parse(JSON.stringify(node.snapshot.penStrokes || []));
-    currentNodeId.current = nodeId;
-    draw();
-    persistHistoryToLocal();
-  };
+  const childId = cur.childrenIds?.[cur.childrenIds.length - 1];
+  if (!childId) return;
 
-  const undo = () => {
-    const cur = nodesMap.current[currentNodeId.current];
-    if (!cur) return;
-    const parentId = cur.parentId;
-    if (!parentId) return;
-    restoreNode(parentId);
+  // snapshot before redo
+  const prev = makeSnapshot();
 
-    // If socket exists, broadcast (guards avoid errors)
+  // apply redo locally
+  restoreNode(childId);
+
+  // snapshot after redo
+  const next = makeSnapshot();
+
+  // find the shape that was added back
+  const added = findAdded(prev, next);
+
+  // if redo added a shape back → save to DB (only if no _id)
+  if (added && !added._id) {
     try {
-      if (socketRef.current) {
-        socketRef.current.emit("undo", {
-          sourceClient: localClientId.current,
-          snapshot: makeSnapshot(),
-        });
+      const saved = await saveShapeToDB(added);
+      if (saved?._id) {
+        // attach ID to local shape so future updates/deletes work
+        added._id = saved._id;
       }
-    } catch (e) { console.warn("undo emit failed", e); }
-  };
+    } catch (e) {
+      console.log("Failed to add shape back to DB:", e);
+    }
+  }
 
-  const redo = () => {
-    const cur = nodesMap.current[currentNodeId.current];
-    if (!cur) return;
-    const childId = cur.childrenIds?.[cur.childrenIds.length - 1];
-    if (!childId) return;
-    restoreNode(childId);
+  // FIND UPDATED SHAPES (moved/resized that reappear with changed props)
+  const updatedPairs = findUpdated(prev, next);
+  for (const { next: nextShape } of updatedPairs) {
+    if (!nextShape || !nextShape._id) continue;
+    const payload = {};
+    if (typeof nextShape.radius === "number") {
+      payload.shape = "circle";
+      payload.points = [{ x: nextShape.x, y: nextShape.y }, { x: nextShape.x + (nextShape.radius || 0), y: nextShape.y }];
+      payload.radius = nextShape.radius;
+    } else if (typeof nextShape.width === "number" || typeof nextShape.height === "number") {
+      payload.shape = "rectangle";
+      payload.points = [{ x: nextShape.x, y: nextShape.y }];
+      payload.width = nextShape.width;
+      payload.height = nextShape.height;
+    } else {
+      payload.shape = "pen";
+      payload.points = nextShape.arr || nextShape.points || [];
+    }
+    if (typeof nextShape.color !== "undefined") payload.color = nextShape.color;
+    if (typeof nextShape.size !== "undefined") payload.size = nextShape.size;
 
     try {
-      if (socketRef.current) {
-        socketRef.current.emit("redo", {
-          sourceClient: localClientId.current,
-          snapshot: makeSnapshot(),
-        });
-      }
-    } catch (e) { console.warn("redo emit failed", e); }
-  };
+      await updateStrokes(String(nextShape._id), payload);
+    } catch (e) {
+      console.warn("updateStrokes failed (redo) for", nextShape._id, e);
+    }
+  }
+
+  // broadcast redo to others
+  try {
+    socketRef.current?.emit("redo", {
+      sourceClient: localClientId.current,
+      snapshot: next,
+    });
+  } catch (e) {
+    console.warn("redo emit failed", e);
+  }
+};
+
+async function saveShapeToDB(s) {
+  if (!s) return null;
+
+  // Pen
+  if (s.arr) {
+    return await addstrokes({
+      shape: "pen",
+      color: s.color,
+      size: s.size,
+      arr: s.arr
+    });
+  }
+
+  // Rectangle
+  if (typeof s.width === "number" && typeof s.height === "number") {
+    return await addstrokes({
+      shape: "rectangle",
+      color: s.color,
+      size: s.size,
+      arr: [{ x: s.x, y: s.y }],
+      width: s.width,
+      height: s.height
+    });
+  }
+
+  // Circle
+  if (typeof s.radius === "number") {
+    return await addstrokes({
+      shape: "circle",
+      color: s.color,
+      size: s.size,
+      arr: [
+        { x: s.x, y: s.y },
+        { x: s.x + s.radius, y: s.y }
+      ],
+      radius: s.radius
+    });
+  }
+
+  return null;
+}
+
 
 
 
@@ -486,18 +804,17 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
       } catch (err) {
         console.error("load strokes error", err);
       } finally {
-        // prefer server-authoritative snapshot on every fresh page load
-        // prefer restoring local undo/redo history if present, otherwise init from server snapshot
-        const restored = restoreHistoryFromLocal();
-        if (restored && currentNodeId.current) {
-          // restore to the node the user had last
-          restoreNode(currentNodeId.current);
-        } else {
-          const initialSnap = makeSnapshot();
-          initHistory(initialSnap);
-          draw();
-        }
-
+        // const restored = restoreHistoryFromLocal();
+        // if (restored && currentNodeId.current) {
+        //   restoreNode(currentNodeId.current);
+        // } else {
+        //   const initialSnap = makeSnapshot();
+        //   initHistory(initialSnap);
+        //   draw();
+        // }
+        const initialSnap = makeSnapshot();
+        initHistory(initialSnap);
+        draw();
 
       }
       console.log(rectangles,circles,penStrokes)
@@ -738,13 +1055,15 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
   // ---------------------------
   // clear / selection functions
   // ---------------------------
-  const clearOne = () => {
+  const clearOne = async() => {
     const sel = lastSelected.current;
     if (!sel) return;
     rectangles.current = rectangles.current.filter((r) => r !== sel);
     circles.current = circles.current.filter((c) => c !== sel);
     penStrokes.current = penStrokes.current.filter((p) => p !== sel);
     lastSelected.current = null;
+    // console.log(sel,"sel")
+    await deleteStroke(sel._id)
     saveState(true);
     draw();
     if (sel._id) {
@@ -752,7 +1071,7 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
     }
   };
 
-  const clearAll = () => {
+  const clearAll = async() => {
     rectangles.current = [];
     circles.current = [];
     penStrokes.current = [];
@@ -760,6 +1079,7 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
     // re-init history root so undo does nothing until user draws again
     initHistory(makeSnapshot());
     draw();
+    await clearAllStrokes()
     // broadcast to other clients
     socketRef.current?.emit("clear:all", { sourceClient: localClientId.current });
   };
@@ -769,11 +1089,17 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
   // render
   // ---------------------------
   return (
-    <div className="flex justify-center items-center w-full h-full">
-      <canvas
-        ref={canvasRef}
-        className="cursor-crosshair border-2 border-gray-400 rounded-lg bg-white"
-      />
-    </div>
-  );
+  <div className="relative flex justify-center items-center w-full h-full">
+
+    {/* Canvas */}
+    <canvas
+      ref={canvasRef}
+      className="cursor-crosshair border-2 border-gray-400 rounded-lg bg-white"
+    />
+
+    {/* Fullscreen loader on top when loading */}
+    {loading && <FullscreenLoader message="Loading whiteboard..." />}
+  </div>
+);
+
 }
