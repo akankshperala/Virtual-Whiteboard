@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 import { useSearchParams } from "next/navigation";
 
 export default function Page() {
-  const params = useSearchParams();
-  const error = params.get("error") || "Unknown error";
+  // const params = useSearchParams();
+  const error =  "Unknown error";
 
   return (
     <div className="p-8 text-center">
