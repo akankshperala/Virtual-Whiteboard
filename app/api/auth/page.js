@@ -13,6 +13,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 
 import { sendOtpAction, verifyOtpAction } from "@/app/actions/otp.actions"
 import toast from "react-hot-toast"
+// at top of server page file (e.g. app/api/auth/page.js)
+export const dynamic = "force-dynamic";
 
 export default function AuthPage() {
   const searchParams = useSearchParams();
