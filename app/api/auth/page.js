@@ -187,7 +187,7 @@ export default function AuthPage() {
               </Button>
 
               <p className="mt-6 text-center text-sm text-gray-600">
-                Don't have an account?{" "}
+                Dont have an account?{" "}
                 <button
                   onClick={() => setIsLogin(false)}
                   className="underline font-medium text-blue-600"

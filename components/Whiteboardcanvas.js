@@ -32,7 +32,15 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
 
   const currentProps = useRef({ activeTool, color, stroke });
   const socketRef = useRef(null);
-  const localClientId = useRef(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+  const localClientId = useRef(null);
+
+// set a stable id on client only (after mount)
+useEffect(() => {
+  if (!localClientId.current) {
+    localClientId.current = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+}, []); // run only once on mount
+
   /* Loader UI (Tailwind) */
   function FullscreenLoader({ message = "Loading whiteboard..." }) {
     return (
@@ -743,11 +751,23 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
   // --- Updated useEffect Code ---
   useEffect(() => {
     if (!page) {
-      return
-    }
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    ctxRef.current = ctx;
+  return;
+}
+
+const canvas = canvasRef.current;
+// Guard: if canvas isn't mounted yet, bail out — will run again when effect re-runs (page change or mount)
+if (!canvas) {
+  return;
+}
+
+// now safe to call
+const ctx = canvas.getContext && canvas.getContext("2d");
+if (!ctx) {
+  console.warn("Canvas 2D context not available yet.");
+  return;
+}
+ctxRef.current = ctx;
+
 
     const resizeCanvas = () => {
       canvas.width = Math.floor(window.innerWidth * 0.9);
@@ -1347,7 +1367,7 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
             >
               Your content area is empty. Create or select a page using the sidebar to the left to start adding your data.
               <br />
-              <span className="font-bold text-sky-400">Let's build something great!</span>
+              <span className="font-bold text-sky-400">Lets build something great!</span>
             </p>
 
             {/* Subtle Hint/Footer - Muted background */}

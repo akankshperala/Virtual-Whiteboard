@@ -278,7 +278,7 @@ export default function TopBar(page) {
         <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 pointer-events-auto">
           <div className="bg-white rounded-lg w-11/12 max-w-md p-4 shadow-lg">
             <h3 className="text-lg font-semibold mb-2">Share PNG</h3>
-            <p className="text-sm text-gray-600 mb-3">Native sharing isn't available — use one of the options below.</p>
+            <p className="text-sm text-gray-600 mb-3">Native sharing isnt available — use one of the options below.</p>
 
             {fallbackBlobUrl && <img src={fallbackBlobUrl} alt="preview" className="w-full mb-3 rounded border" />}
 
