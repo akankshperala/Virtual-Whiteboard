@@ -12,7 +12,6 @@ export async function sendOtpAction(email) {
   if (!email) throw new Error("Email is required");
   const check=await User.find({email})
   if (check.length!=0){
-    console.log(check)
     return { success: false, message: "Email is being used" }
   }
   // Generate OTP
@@ -20,7 +19,6 @@ export async function sendOtpAction(email) {
 
   // Store OTP
   otpStore[email] = otp;
-console.log(otp,otpStore)
   // Nodemailer transporter
   const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
@@ -51,7 +49,6 @@ console.log(otp,otpStore)
 // Verify OTP
 export async function verifyOtpAction(email, otp) {
   const storedOtp = otpStore[email];
-  console.log(otp,storedOtp)
   if (!storedOtp) return { success: false, message: "No OTP found" };
 
   if (otp === storedOtp) {

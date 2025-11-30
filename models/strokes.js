@@ -3,6 +3,10 @@ import mongoose from "mongoose";
 const strokesSchema = new mongoose.Schema({
   strokes: [
     {
+      pageId:{
+        type: String,
+        // required: true,
+      },
       shape:String,
       color: String,
       size: Number,

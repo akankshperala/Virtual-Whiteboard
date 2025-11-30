@@ -76,7 +76,6 @@ export const authoptions = NextAuth({
   //   },
   callbacks: {
     async signIn({ user, email, profile, account }) {
-        console.log(user)
         user.account=account.provider
       if (account.provider !== "google") return true;
       await connectdb();
@@ -111,7 +110,6 @@ export const authoptions = NextAuth({
       return baseUrl;
     },
     async jwt({ token, user }) {
-        console.log(user)
       if (user) {
           token.id = user.id;
           token.username = user.username;

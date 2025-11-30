@@ -13,7 +13,6 @@ const io = new Server(server, {
 });
 
 io.on("connection", (socket) => {
-  console.log("socket connected:", socket.id);
 
   // client -> server events (server will forward to others)
   socket.on("stroke:created", (payload) => {

@@ -52,7 +52,7 @@ app.prepare().then(() => {
     socket.on("stroke:created", (payload) => {
       // payload expected: { _id, shape, points, color, size, width?, height?, sourceClient? }
       // console.error(1111111111)
-      // console.error(payload,"payload")
+      console.error(payload,"payload")
       socket.broadcast.emit("stroke:created", payload);
     });
 
@@ -73,14 +73,14 @@ app.prepare().then(() => {
       socket.broadcast.emit("clear:all", payload);
     });
     // when a client sends an undo snapshot, broadcast to everyone else
-socket.on("undo", ({ sourceClient, snapshot }) => {
+socket.on("undo", ({ sourceClient, snapshot,pageId }) => {
   // optional: validate snapshot shape here, or check auth
-  socket.broadcast.emit("undo", { sourceClient, snapshot });
+  socket.broadcast.emit("undo", { sourceClient, snapshot,pageId });
 });
 
 // when a client sends a redo snapshot, broadcast to everyone else
-socket.on("redo", ({ sourceClient, snapshot }) => {
-  socket.broadcast.emit("redo", { sourceClient, snapshot });
+socket.on("redo", ({ sourceClient, snapshot,pageId }) => {
+  socket.broadcast.emit("redo", { sourceClient, snapshot,pageId });
 });
 
     // Messaging example you already had (keeps targeted messaging)

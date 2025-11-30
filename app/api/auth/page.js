@@ -61,7 +61,6 @@ export default function AuthPage() {
       password: loginPassword,
     });
 
-    console.log("Login result:", res);
     if (res?.ok) {
       toast.success("Login successful");
     } else {
@@ -87,7 +86,6 @@ export default function AuthPage() {
       if (!res.ok) throw new Error(data.error || "Registration failed");
 
       toast.success("Registered successfully, now login!");
-      console.log(data);
     } catch (err) {
       console.error(err);
       toast.error("Error: " + err.message);
@@ -121,7 +119,6 @@ export default function AuthPage() {
         setIsOtpModalOpen(false);
         toast.success("Email verified successfully!");
       } else {
-        console.log(res, 'res')
         toast.error(res.message);
       }
     } catch (err) {

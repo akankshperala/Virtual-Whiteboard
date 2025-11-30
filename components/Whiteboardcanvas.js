@@ -1,12 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { addstrokes, clearAllStrokes, deleteStroke, getstrokes, updateStrokes } from "@/app/actions/useractions";
+import { addStrokeForPage, addstrokes, clearAllStrokes, deleteStroke, getstrokes, getStrokesByPageId, updateStrokes } from "@/app/actions/useractions";
 import { io } from "socket.io-client";
 import { useSession } from "next-auth/react";
 
-export default function WhiteboardCanvas({ setActiveTool, activeTool, color, stroke }) {
+export default function WhiteboardCanvas({ setActiveTool, activeTool, color, stroke, setColor, page }) {
   const canvasRef = useRef(null);
-  const {data:session,status}=useSession()
+  const { data: session, status } = useSession()
   const ctxRef = useRef(null);
 
   // shape storage
@@ -34,13 +34,13 @@ export default function WhiteboardCanvas({ setActiveTool, activeTool, color, str
   const socketRef = useRef(null);
   const localClientId = useRef(`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   /* Loader UI (Tailwind) */
-function FullscreenLoader({ message = "Loading whiteboard..." }) {
-  return (
-    <div className="fancy-loader-root" role="status" aria-live="polite" aria-busy="true">
-      <div className="loader" aria-hidden="true"></div>
-      <div className="sr-only">{message}</div>
+  function FullscreenLoader({ message = "Loading whiteboard..." }) {
+    return (
+      <div className="fancy-loader-root" role="status" aria-live="polite" aria-busy="true">
+        <div className="loader" aria-hidden="true"></div>
+        <div className="sr-only">{message}</div>
 
-      <style jsx>{`
+        <style jsx>{`
         .fancy-loader-root {
           position: absolute;
           inset: 0;
@@ -127,26 +127,161 @@ function FullscreenLoader({ message = "Loading whiteboard..." }) {
           }
         }
       `}</style>
-    </div>
-  );
-}
+      </div>
+    );
+  }
 
 
 
   useEffect(() => {
-    if (status=="loading"){
+    if (status == "loading") {
       setLoading(true)
     }
-    else{
+    else {
       setLoading(false)
     }
-  
-  }, [status])
-  
 
+  }, [status])
+
+
+  // inside WhiteboardCanvas component — add near other useEffects
+  useEffect(() => {
+    // helper: reliably download a blob or dataURL
+    const downloadBlobOrDataUrl = (blobOrDataUrl, filename) => {
+      // If string -> dataURL; if Blob -> createObjectURL
+      let url;
+      let isDataUrl = false;
+      if (typeof blobOrDataUrl === "string") {
+        url = blobOrDataUrl;
+        isDataUrl = true;
+      } else {
+        url = URL.createObjectURL(blobOrDataUrl);
+      }
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      // append and click while still in user-gesture flow (we call this synchronously)
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      // revoke object URL for Blobs after a short delay so browser has time to start download
+      if (!isDataUrl) {
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }
+    };
+
+    // Promise wrapper for canvas.toBlob
+    const toBlobPromise = (canvas, type, quality) =>
+      new Promise((resolve) => {
+        try {
+          canvas.toBlob((b) => resolve(b), type, quality);
+        } catch (e) {
+          // toBlob can throw in rare cases (security / tainted canvas)
+          resolve(null);
+        }
+      });
+
+    // Export image (PNG) — robust with fallback
+    const exportImage = async ({ pageId: maybePageId } = {}) => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        console.warn("Export aborted: canvas not ready.");
+        return;
+      }
+
+      if (!canvas.width || !canvas.height) {
+        console.warn("Export aborted: canvas has zero width/height.");
+        return;
+      }
+
+      try {
+        // Use scale if you want higher-res exports
+        const scale = 2;
+        const off = document.createElement("canvas");
+        off.width = Math.max(1, Math.floor(canvas.width * scale));
+        off.height = Math.max(1, Math.floor(canvas.height * scale));
+        const ctx = off.getContext("2d");
+
+        // white background
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, off.width, off.height);
+
+        // scale drawing
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+        ctx.drawImage(canvas, 0, 0);
+
+        // First try toBlob (async)
+        const blob = await toBlobPromise(off, "image/png", 1);
+        const id = maybePageId || page?.pageId || "page";
+        const name = `whiteboard-${id}-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+
+        if (blob) {
+          downloadBlobOrDataUrl(blob, name);
+          return;
+        }
+
+        // Fallback: toDataURL (synchronous) — slightly heavier but reliable
+        try {
+          const dataUrl = off.toDataURL("image/png");
+          downloadBlobOrDataUrl(dataUrl, name);
+        } catch (err) {
+          console.error("Export fallback toDataURL failed:", err);
+        }
+      } catch (err) {
+        console.error("exportImage failed:", err);
+      }
+    };
+
+    // Export JSON of strokes
+    const exportJSON = ({ pageId: maybePageId } = {}) => {
+      try {
+        const payload = {
+          pageId: maybePageId || page?.pageId || null,
+          exportedAt: new Date().toISOString(),
+          rectangles: (rectangles.current || []).map(r => ({
+            x: r.x, y: r.y, width: r.width, height: r.height, color: r.color, size: r.size, _id: r._id || null
+          })),
+          circles: (circles.current || []).map(c => ({
+            x: c.x, y: c.y, radius: c.radius, color: c.color, size: c.size, _id: c._id || null
+          })),
+          penStrokes: (penStrokes.current || []).map(p => ({
+            arr: p.arr || p.points || [],
+            color: p.color,
+            size: p.size,
+            _id: p._id || null
+          }))
+        };
+
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const id = payload.pageId || "page";
+        const filename = `whiteboard-${id}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+        downloadBlobOrDataUrl(blob, filename);
+      } catch (err) {
+        console.error("exportJSON failed:", err);
+      }
+    };
+
+    // Event listeners for custom events dispatched from TopBar/Menubar
+    const handleExportImage = (e) => {
+      // try to do the download immediately (so browser sees it as user-initiated)
+      exportImage({ pageId: e?.detail?.pageId });
+    };
+    const handleExportJSON = (e) => {
+      exportJSON({ pageId: e?.detail?.pageId });
+    };
+
+    window.addEventListener("export-image", handleExportImage);
+    window.addEventListener("export-json", handleExportJSON);
+
+    return () => {
+      window.removeEventListener("export-image", handleExportImage);
+      window.removeEventListener("export-json", handleExportJSON);
+    };
+  }, [canvasRef, page?.pageId /* include page?.pageId if used */]);
 
   useEffect(() => {
-    console.log(activeTool)
     if (activeTool == "clearone") {
       clearOne()
       setActiveTool("pen")
@@ -163,6 +298,9 @@ function FullscreenLoader({ message = "Loading whiteboard..." }) {
     if (activeTool == "redo") {
       redo();
       setActiveTool("pen");
+    }
+    if (activeTool == "pen") {
+      setColor("black")
     }
 
     currentProps.current = { activeTool, color, stroke };
@@ -182,331 +320,336 @@ function FullscreenLoader({ message = "Loading whiteboard..." }) {
     penStrokes: JSON.parse(JSON.stringify(penStrokes.current)),
   });
 
-// --- no-op local persistence (keeps other code calling these safe) ---
-const persistHistoryToLocal = () => {
-  // intentionally left blank — history is in-memory only now
-};
-
-const restoreHistoryFromLocal = () => {
-  // intentionally return false to indicate no local history present
-  return false;
-};
-
-const initHistory = (initialSnapshot) => {
-  const rootId = newId();
-  const node = {
-    id: rootId,
-    parentId: null,
-    childrenIds: [],
-    snapshot: initialSnapshot,
-    createdAt: Date.now(),
+  // --- no-op local persistence (keeps other code calling these safe) ---
+  const persistHistoryToLocal = () => {
+    // intentionally left blank — history is in-memory only now
   };
-  nodesMap.current = { [rootId]: node };
-  historyRoot.current = node;
-  currentNodeId.current = rootId;
-  // no local persistence
-};
 
-const saveState = (fromUser = true) => {
-  const snap = makeSnapshot();
-  const id = newId();
-  const parentId = currentNodeId.current;
-  const node = {
-    id,
-    parentId,
-    childrenIds: [],
-    snapshot: snap,
-    createdAt: Date.now(),
-  };
-  nodesMap.current[id] = node;
-  if (parentId && nodesMap.current[parentId]) {
-    nodesMap.current[parentId].childrenIds.push(id);
-  }
-  currentNodeId.current = id;
-  // no local persistence
-};
-
-const restoreNode = (nodeId) => {
-  const node = nodesMap.current[nodeId];
-  if (!node || !node.snapshot) return;
-  rectangles.current = JSON.parse(JSON.stringify(node.snapshot.rectangles || []));
-  circles.current = JSON.parse(JSON.stringify(node.snapshot.circles || []));
-  penStrokes.current = JSON.parse(JSON.stringify(node.snapshot.penStrokes || []));
-  currentNodeId.current = nodeId;
-  draw();
-  // no local persistence
-};
-
-function findRemoved(prev, next) {
-  const prevAll = [
-    ...(prev.rectangles || []),
-    ...(prev.circles || []),
-    ...(prev.penStrokes || [])
-  ];
-
-  const nextAll = [
-    ...(next.rectangles || []),
-    ...(next.circles || []),
-    ...(next.penStrokes || [])
-  ];
-
-  // Find a shape that existed before but not after
-  const removed = prevAll.find(
-    p => !nextAll.some(n => n === p || (n._id && p._id && n._id === p._id))
-  );
-
-  return removed || null;
-}
-function findAdded(prev, next) {
-  const prevAll = [
-    ...(prev.rectangles || []),
-    ...(prev.circles || []),
-    ...(prev.penStrokes || [])
-  ];
-
-  const nextAll = [
-    ...(next.rectangles || []),
-    ...(next.circles || []),
-    ...(next.penStrokes || [])
-  ];
-
-  // Find a shape that appears in next but not before
-  const added = nextAll.find(
-    n => !prevAll.some(p => p === n || (p._id && n._id && p._id === n._id))
-  );
-
-  return added || null;
-}
-
-function shallowShapeEquals(a, b) {
-  if (!a || !b) return false;
-  // Compare relevant fields for shapes
-  const ka = {
-    x: a.x, y: a.y, width: a.width, height: a.height, radius: a.radius,
-    color: a.color, size: a.size,
-    arr: Array.isArray(a.arr) ? a.arr : (Array.isArray(a.points) ? a.points : []),
-  };
-  const kb = {
-    x: b.x, y: b.y, width: b.width, height: b.height, radius: b.radius,
-    color: b.color, size: b.size,
-    arr: Array.isArray(b.arr) ? b.arr : (Array.isArray(b.points) ? b.points : []),
-  };
-  try {
-    return JSON.stringify(ka) === JSON.stringify(kb);
-  } catch (e) {
+  const restoreHistoryFromLocal = () => {
+    // intentionally return false to indicate no local history present
     return false;
-  }
-}
+  };
 
-/**
- * Returns array of { prevShape, nextShape } where same _id but changed
- */
-function findUpdated(prev, next) {
-  const prevAll = [
-    ...(prev.rectangles || []),
-    ...(prev.circles || []),
-    ...(prev.penStrokes || [])
-  ];
-  const nextAll = [
-    ...(next.rectangles || []),
-    ...(next.circles || []),
-    ...(next.penStrokes || [])
-  ];
+  const initHistory = (initialSnapshot) => {
+    const rootId = newId();
+    const node = {
+      id: rootId,
+      parentId: null,
+      childrenIds: [],
+      snapshot: initialSnapshot,
+      createdAt: Date.now(),
+    };
+    nodesMap.current = { [rootId]: node };
+    historyRoot.current = node;
+    currentNodeId.current = rootId;
+    // no local persistence
+  };
 
-  const prevById = new Map(prevAll.filter(s => s && s._id).map(s => [String(s._id), s]));
-  const updated = [];
-
-  for (const n of nextAll) {
-    if (!n || !n._id) continue;
-    const id = String(n._id);
-    const p = prevById.get(id);
-    if (p && !shallowShapeEquals(p, n)) {
-      updated.push({ prev: p, next: n });
+  const saveState = (fromUser = true) => {
+    const snap = makeSnapshot();
+    const id = newId();
+    const parentId = currentNodeId.current;
+    const node = {
+      id,
+      parentId,
+      childrenIds: [],
+      snapshot: snap,
+      createdAt: Date.now(),
+    };
+    nodesMap.current[id] = node;
+    if (parentId && nodesMap.current[parentId]) {
+      nodesMap.current[parentId].childrenIds.push(id);
     }
+    currentNodeId.current = id;
+    // no local persistence
+  };
+
+  const restoreNode = (nodeId) => {
+    const node = nodesMap.current[nodeId];
+    if (!node || !node.snapshot) return;
+    rectangles.current = JSON.parse(JSON.stringify(node.snapshot.rectangles || []));
+    circles.current = JSON.parse(JSON.stringify(node.snapshot.circles || []));
+    penStrokes.current = JSON.parse(JSON.stringify(node.snapshot.penStrokes || []));
+    currentNodeId.current = nodeId;
+    draw();
+    // no local persistence
+  };
+
+  function findRemoved(prev, next) {
+    const prevAll = [
+      ...(prev.rectangles || []),
+      ...(prev.circles || []),
+      ...(prev.penStrokes || [])
+    ];
+
+    const nextAll = [
+      ...(next.rectangles || []),
+      ...(next.circles || []),
+      ...(next.penStrokes || [])
+    ];
+
+    // Find a shape that existed before but not after
+    const removed = prevAll.find(
+      p => !nextAll.some(n => n === p || (n._id && p._id && n._id === p._id))
+    );
+
+    return removed || null;
   }
-  return updated;
-}
+  function findAdded(prev, next) {
+    const prevAll = [
+      ...(prev.rectangles || []),
+      ...(prev.circles || []),
+      ...(prev.penStrokes || [])
+    ];
 
+    const nextAll = [
+      ...(next.rectangles || []),
+      ...(next.circles || []),
+      ...(next.penStrokes || [])
+    ];
 
-const undo = async () => {
-  const cur = nodesMap.current[currentNodeId.current];
-  if (!cur) return;
-  const parentId = cur.parentId;
-  if (!parentId) return;
+    // Find a shape that appears in next but not before
+    const added = nextAll.find(
+      n => !prevAll.some(p => p === n || (p._id && n._id && p._id === n._id))
+    );
 
-  // snapshot before undo
-  const prev = makeSnapshot();
+    return added || null;
+  }
 
-  // restore target snapshot (after undo)
-  restoreNode(parentId);
-
-  // snapshot after undo
-  const next = makeSnapshot();
-
-  // FIND REMOVED SHAPE
-  const removed = findRemoved(prev, next);
-
-  // DELETE ONLY THAT SHAPE IN DB
-  if (removed && removed._id) {
+  function shallowShapeEquals(a, b) {
+    if (!a || !b) return false;
+    // Compare relevant fields for shapes
+    const ka = {
+      x: a.x, y: a.y, width: a.width, height: a.height, radius: a.radius,
+      color: a.color, size: a.size,
+      arr: Array.isArray(a.arr) ? a.arr : (Array.isArray(a.points) ? a.points : []),
+    };
+    const kb = {
+      x: b.x, y: b.y, width: b.width, height: b.height, radius: b.radius,
+      color: b.color, size: b.size,
+      arr: Array.isArray(b.arr) ? b.arr : (Array.isArray(b.points) ? b.points : []),
+    };
     try {
-      await deleteStroke(removed._id);
+      return JSON.stringify(ka) === JSON.stringify(kb);
     } catch (e) {
-      console.log("Failed to delete from DB:", e);
+      return false;
     }
   }
 
-  // FIND UPDATED SHAPES (moved / resized / color / size changes)
-  const updatedPairs = findUpdated(prev, next);
-  for (const { next: nextShape } of updatedPairs) {
-    if (!nextShape || !nextShape._id) continue;
-    const payload = {};
-    // shape type
-    if (typeof nextShape.radius === "number") {
-      payload.shape = "circle";
-      payload.points = [{ x: nextShape.x, y: nextShape.y }, { x: nextShape.x + (nextShape.radius || 0), y: nextShape.y }];
-      payload.radius = nextShape.radius;
-    } else if (typeof nextShape.width === "number" || typeof nextShape.height === "number") {
-      payload.shape = "rectangle";
-      payload.points = [{ x: nextShape.x, y: nextShape.y }];
-      payload.width = nextShape.width;
-      payload.height = nextShape.height;
-    } else {
-      payload.shape = "pen";
-      payload.points = nextShape.arr || nextShape.points || [];
-    }
-    if (typeof nextShape.color !== "undefined") payload.color = nextShape.color;
-    if (typeof nextShape.size !== "undefined") payload.size = nextShape.size;
+  /**
+   * Returns array of { prevShape, nextShape } where same _id but changed
+   */
+  function findUpdated(prev, next) {
+    const prevAll = [
+      ...(prev.rectangles || []),
+      ...(prev.circles || []),
+      ...(prev.penStrokes || [])
+    ];
+    const nextAll = [
+      ...(next.rectangles || []),
+      ...(next.circles || []),
+      ...(next.penStrokes || [])
+    ];
 
-    try {
-      await updateStrokes(String(nextShape._id), payload);
-    } catch (e) {
-      console.warn("updateStrokes failed (undo) for", nextShape._id, e);
-    }
-  }
+    const prevById = new Map(prevAll.filter(s => s && s._id).map(s => [String(s._id), s]));
+    const updated = [];
 
-  // BROADCAST UNDO
-  try {
-    socketRef.current?.emit("undo", {
-      sourceClient: localClientId.current,
-      snapshot: next,
-    });
-  } catch (e) {
-    console.warn("undo emit failed", e);
-  }
-};
-
-const redo = async () => {
-  const cur = nodesMap.current[currentNodeId.current];
-  if (!cur) return;
-
-  const childId = cur.childrenIds?.[cur.childrenIds.length - 1];
-  if (!childId) return;
-
-  // snapshot before redo
-  const prev = makeSnapshot();
-
-  // apply redo locally
-  restoreNode(childId);
-
-  // snapshot after redo
-  const next = makeSnapshot();
-
-  // find the shape that was added back
-  const added = findAdded(prev, next);
-
-  // if redo added a shape back → save to DB (only if no _id)
-  if (added && !added._id) {
-    try {
-      const saved = await saveShapeToDB(added);
-      if (saved?._id) {
-        // attach ID to local shape so future updates/deletes work
-        added._id = saved._id;
+    for (const n of nextAll) {
+      if (!n || !n._id) continue;
+      const id = String(n._id);
+      const p = prevById.get(id);
+      if (p && !shallowShapeEquals(p, n)) {
+        updated.push({ prev: p, next: n });
       }
-    } catch (e) {
-      console.log("Failed to add shape back to DB:", e);
     }
+    return updated;
   }
 
-  // FIND UPDATED SHAPES (moved/resized that reappear with changed props)
-  const updatedPairs = findUpdated(prev, next);
-  for (const { next: nextShape } of updatedPairs) {
-    if (!nextShape || !nextShape._id) continue;
-    const payload = {};
-    if (typeof nextShape.radius === "number") {
-      payload.shape = "circle";
-      payload.points = [{ x: nextShape.x, y: nextShape.y }, { x: nextShape.x + (nextShape.radius || 0), y: nextShape.y }];
-      payload.radius = nextShape.radius;
-    } else if (typeof nextShape.width === "number" || typeof nextShape.height === "number") {
-      payload.shape = "rectangle";
-      payload.points = [{ x: nextShape.x, y: nextShape.y }];
-      payload.width = nextShape.width;
-      payload.height = nextShape.height;
-    } else {
-      payload.shape = "pen";
-      payload.points = nextShape.arr || nextShape.points || [];
-    }
-    if (typeof nextShape.color !== "undefined") payload.color = nextShape.color;
-    if (typeof nextShape.size !== "undefined") payload.size = nextShape.size;
 
+  const undo = async () => {
+    const cur = nodesMap.current[currentNodeId.current];
+    if (!cur) return;
+    const parentId = cur.parentId;
+    if (!parentId) return;
+
+    // snapshot before undo
+    const prev = makeSnapshot();
+
+    // restore target snapshot (after undo)
+    restoreNode(parentId);
+
+    // snapshot after undo
+    const next = makeSnapshot();
+
+    // FIND REMOVED SHAPE
+    const removed = findRemoved(prev, next);
+
+    // DELETE ONLY THAT SHAPE IN DB
+    if (removed && removed._id) {
+      try {
+        await deleteStroke(removed._id);
+      } catch (e) {
+        console.log("Failed to delete from DB:", e);
+      }
+    }
+
+    // FIND UPDATED SHAPES (moved / resized / color / size changes)
+    const updatedPairs = findUpdated(prev, next);
+    for (const { next: nextShape } of updatedPairs) {
+      if (!nextShape || !nextShape._id) continue;
+      const payload = {};
+      // shape type
+      if (typeof nextShape.radius === "number") {
+        payload.shape = "circle";
+        payload.points = [{ x: nextShape.x, y: nextShape.y }, { x: nextShape.x + (nextShape.radius || 0), y: nextShape.y }];
+        payload.radius = nextShape.radius;
+      } else if (typeof nextShape.width === "number" || typeof nextShape.height === "number") {
+        payload.shape = "rectangle";
+        payload.points = [{ x: nextShape.x, y: nextShape.y }];
+        payload.width = nextShape.width;
+        payload.height = nextShape.height;
+      } else {
+        payload.shape = "pen";
+        payload.points = nextShape.arr || nextShape.points || [];
+      }
+      if (typeof nextShape.color !== "undefined") payload.color = nextShape.color;
+      if (typeof nextShape.size !== "undefined") payload.size = nextShape.size;
+
+      try {
+        await updateStrokes(String(nextShape._id), payload);
+      } catch (e) {
+        console.warn("updateStrokes failed (undo) for", nextShape._id, e);
+      }
+    }
+
+    // BROADCAST UNDO
     try {
-      await updateStrokes(String(nextShape._id), payload);
+      socketRef.current?.emit("undo", {
+        sourceClient: localClientId.current,
+        snapshot: next,
+        pageId: page.pageId,
+      });
     } catch (e) {
-      console.warn("updateStrokes failed (redo) for", nextShape._id, e);
+      console.warn("undo emit failed", e);
     }
+  };
+
+  const redo = async () => {
+    const cur = nodesMap.current[currentNodeId.current];
+    if (!cur) return;
+
+    const childId = cur.childrenIds?.[cur.childrenIds.length - 1];
+    if (!childId) return;
+
+    // snapshot before redo
+    const prev = makeSnapshot();
+
+    // apply redo locally
+    restoreNode(childId);
+
+    // snapshot after redo
+    const next = makeSnapshot();
+
+    // find the shape that was added back
+    const added = findAdded(prev, next);
+
+    // if redo added a shape back → save to DB (only if no _id)
+    if (added && !added._id) {
+      try {
+        const saved = await saveShapeToDB(added);
+        if (saved?._id) {
+          // attach ID to local shape so future updates/deletes work
+          added._id = saved._id;
+        }
+      } catch (e) {
+        console.log("Failed to add shape back to DB:", e);
+      }
+    }
+
+    // FIND UPDATED SHAPES (moved/resized that reappear with changed props)
+    const updatedPairs = findUpdated(prev, next);
+    for (const { next: nextShape } of updatedPairs) {
+      if (!nextShape || !nextShape._id) continue;
+      const payload = {};
+      if (typeof nextShape.radius === "number") {
+        payload.shape = "circle";
+        payload.points = [{ x: nextShape.x, y: nextShape.y }, { x: nextShape.x + (nextShape.radius || 0), y: nextShape.y }];
+        payload.radius = nextShape.radius;
+      } else if (typeof nextShape.width === "number" || typeof nextShape.height === "number") {
+        payload.shape = "rectangle";
+        payload.points = [{ x: nextShape.x, y: nextShape.y }];
+        payload.width = nextShape.width;
+        payload.height = nextShape.height;
+      } else {
+        payload.shape = "pen";
+        payload.points = nextShape.arr || nextShape.points || [];
+      }
+      if (typeof nextShape.color !== "undefined") payload.color = nextShape.color;
+      if (typeof nextShape.size !== "undefined") payload.size = nextShape.size;
+
+      try {
+        await updateStrokes(String(nextShape._id), payload);
+      } catch (e) {
+        console.warn("updateStrokes failed (redo) for", nextShape._id, e);
+      }
+    }
+
+    // broadcast redo to others
+    try {
+      socketRef.current?.emit("redo", {
+        sourceClient: localClientId.current,
+        snapshot: next,
+        pageId: page.pageId
+      });
+    } catch (e) {
+      console.warn("redo emit failed", e);
+    }
+  };
+
+  async function saveShapeToDB(s) {
+    if (!s) return null;
+
+    // Pen
+    if (s.arr) {
+      return await addStrokeForPage({
+        pageId: page.pageId,
+        shape: "pen",
+        color: s.color,
+        size: s.size,
+        arr: s.arr
+      });
+    }
+
+    // Rectangle
+    if (typeof s.width === "number" && typeof s.height === "number") {
+      return await addStrokeForPage({
+        pageId: page.pageId,
+        shape: "rectangle",
+        color: s.color,
+        size: s.size,
+        arr: [{ x: s.x, y: s.y }],
+        width: s.width,
+        height: s.height
+      });
+    }
+
+    // Circle
+    if (typeof s.radius === "number") {
+      return await addStrokeForPage({
+        pageId: page.pageId,
+        shape: "circle",
+        color: s.color,
+        size: s.size,
+        arr: [
+          { x: s.x, y: s.y },
+          { x: s.x + s.radius, y: s.y }
+        ],
+        radius: s.radius
+      });
+    }
+
+    return null;
   }
-
-  // broadcast redo to others
-  try {
-    socketRef.current?.emit("redo", {
-      sourceClient: localClientId.current,
-      snapshot: next,
-    });
-  } catch (e) {
-    console.warn("redo emit failed", e);
-  }
-};
-
-async function saveShapeToDB(s) {
-  if (!s) return null;
-
-  // Pen
-  if (s.arr) {
-    return await addstrokes({
-      shape: "pen",
-      color: s.color,
-      size: s.size,
-      arr: s.arr
-    });
-  }
-
-  // Rectangle
-  if (typeof s.width === "number" && typeof s.height === "number") {
-    return await addstrokes({
-      shape: "rectangle",
-      color: s.color,
-      size: s.size,
-      arr: [{ x: s.x, y: s.y }],
-      width: s.width,
-      height: s.height
-    });
-  }
-
-  // Circle
-  if (typeof s.radius === "number") {
-    return await addstrokes({
-      shape: "circle",
-      color: s.color,
-      size: s.size,
-      arr: [
-        { x: s.x, y: s.y },
-        { x: s.x + s.radius, y: s.y }
-      ],
-      radius: s.radius
-    });
-  }
-
-  return null;
-}
 
 
 
@@ -597,24 +740,45 @@ async function saveShapeToDB(s) {
   // ---------------------------
   // canvas mount & event handlers
   // ---------------------------
+  // --- Updated useEffect Code ---
   useEffect(() => {
+    if (!page) {
+      return
+    }
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     ctxRef.current = ctx;
+
     const resizeCanvas = () => {
       canvas.width = Math.floor(window.innerWidth * 0.9);
       canvas.height = Math.floor(window.innerHeight * 0.8);
       draw();
     };
-    resizeCanvas();
+
+    // ✅ FIX 1: Set initial dimensions (e.g., 800x600) before client-side resize
+    // This ensures the initial DOM rendered by the server matches the first client render.
+    canvas.width = 800;
+    canvas.height = 600;
+
+    resizeCanvas(); // Now runs after the initial fixed size is set (first client side render)
+
     window.addEventListener("resize", resizeCanvas);
+
+    // ... rest of the code is unchanged ...
+    rectangles.current = []
+    circles.current = []
+    penStrokes.current = []
+    // initHistory()
 
     socketRef.current = io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001", {
       transports: ["websocket"],
-      // optionally send auth user id:
+      // optionally senFsoctrefd auth user id:
       // auth: { userId: currentUserId || null }
     });
     socketRef.current.on("stroke:created", (stroke) => {
+      if (stroke.pageId !== page.pageId) {
+        return
+      }
       try {
         if (!stroke) return;
         if (stroke.sourceClient === localClientId.current) return; // ignore our own broadcast
@@ -635,7 +799,6 @@ async function saveShapeToDB(s) {
             size: stroke.size,
           });
         } else if (stroke.shape === "circle") {
-          console.log(stroke, "strpok")
           circles.current.push({
             x: stroke.points?.[0]?.x ?? 0,
             y: stroke.points?.[0]?.y ?? 0,
@@ -660,9 +823,11 @@ async function saveShapeToDB(s) {
     });
 
     socketRef.current.on("stroke:updated", (stroke) => {
+      if (stroke.pageId !== page.pageId) {
+        return
+      }
       try {
         // ignore our own broadcasts
-        console.log(4)
         if (stroke.sourceClient === localClientId.current) return;
 
         // normalise incoming points (support older 'arr' too)
@@ -670,8 +835,6 @@ async function saveShapeToDB(s) {
 
         // rectangles
         const r = rectangles.current.find(x => x._id === stroke._id);
-        console.log(r, "r")
-        console.log(stroke)
         if (r) {
           r.x = pts[0]?.x ?? r.x;
           r.y = pts[0]?.y ?? r.y;
@@ -680,7 +843,6 @@ async function saveShapeToDB(s) {
           // keep optional stored points too
           r.points = pts.length ? pts : r.points;
           saveState(false);
-          console.log(r)
           draw();
           return;
         }
@@ -714,6 +876,7 @@ async function saveShapeToDB(s) {
     });
 
     socketRef.current.on("stroke:deleted", ({ _id, sourceClient }) => {
+
       if (sourceClient === localClientId.current) return;
       rectangles.current = rectangles.current.filter(r => r._id !== _id);
       circles.current = circles.current.filter(c => c._id !== _id);
@@ -723,7 +886,10 @@ async function saveShapeToDB(s) {
     });
 
     // Receive UNDO from another user
-    socketRef.current.on("undo", ({ sourceClient, snapshot }) => {
+    socketRef.current.on("undo", ({ sourceClient, snapshot, pageId }) => {
+      if (pageId !== page.pageId) {
+        return
+      }
       // console.error(0)
       if (sourceClient === localClientId.current) return;
 
@@ -738,7 +904,10 @@ async function saveShapeToDB(s) {
       draw();
     });
 
-    socketRef.current.on("redo", ({ sourceClient, snapshot }) => {
+    socketRef.current.on("redo", ({ sourceClient, snapshot, pageId }) => {
+      if (pageId !== page.pageId) {
+        return
+      }
       if (sourceClient === localClientId.current) return;
 
       rectangles.current = snapshot.rectangles || [];
@@ -763,8 +932,8 @@ async function saveShapeToDB(s) {
     // restore strokes from backend
     (async () => {
       try {
-        const points = await getstrokes();
-        console.log(points)
+        const points = await getStrokesByPageId((page ? page.pageId : 0));
+        // console.log(points)
         if (Array.isArray(points) && points.length) {
           points.forEach((stroke) => {
             try {
@@ -798,7 +967,7 @@ async function saveShapeToDB(s) {
             } catch (e) {
               console.warn("skip stroke:", e);
             }
-            console.log(stroke,rectangles,circles,penStrokes)
+            // console.log(stroke,rectangles,circles,penStrokes)
           });
         }
       } catch (err) {
@@ -817,7 +986,7 @@ async function saveShapeToDB(s) {
         draw();
 
       }
-      console.log(rectangles,circles,penStrokes)
+      // console.log(rectangles,circles,penStrokes)
     })();
 
     // --- mouse & keyboard ---
@@ -932,7 +1101,8 @@ async function saveShapeToDB(s) {
         if (points.length > 0) {
           try {
             // console.log(77777777777)
-            const res = await addstrokes({
+            const res = await addStrokeForPage({
+              pageId: page.pageId,
               shape: "pen",
               color: cur.color,
               size: cur.size,
@@ -947,7 +1117,6 @@ async function saveShapeToDB(s) {
           }
         }
       }
-      console.log(lastSelected.current, "oloko")
       if (lastSelected.current) {
         const s = lastSelected.current;
         // console.log(s,"sss")
@@ -955,6 +1124,7 @@ async function saveShapeToDB(s) {
           if (rectangles.current.includes(s)) {
             if (s._id) {
               const updated = await updateStrokes(s._id, {
+                pageId: page.pageId,
                 shape: "rectangle",
                 color: s.color || "black",
                 points: [{ x: s.x, y: s.y }],   // <-- match backend field (points or arr)
@@ -966,7 +1136,8 @@ async function saveShapeToDB(s) {
 
             } else {
 
-              const res = await addstrokes({
+              const res = await addStrokeForPage({
+                pageId: page.pageId,
                 shape: "rectangle",
                 color: s.color || "black",
                 arr: [{ x: s.x, y: s.y }],
@@ -980,10 +1151,10 @@ async function saveShapeToDB(s) {
               }
             }
           } else if (circles.current.includes(s)) {
-            console.log(s, "sss")
             const arrPts = [{ x: s.x, y: s.y }, { x: s.x + (s.radius || 0), y: s.y }];
             if (s._id) {
               const updated = await updateStrokes(s._id, {
+                pageId: page.pageId,
                 shape: "circle",
                 color: s.color || "black",
                 points: arrPts,
@@ -994,7 +1165,8 @@ async function saveShapeToDB(s) {
 
             } else {
 
-              const res = await addstrokes({
+              const res = await addStrokeForPage({
+                pageId: page.pageId,
                 shape: "circle",
                 color: s.color || "black",
                 arr: arrPts,
@@ -1050,12 +1222,12 @@ async function saveShapeToDB(s) {
       }
 
     };
-  }, []);
+  }, [page]);
 
   // ---------------------------
   // clear / selection functions
   // ---------------------------
-  const clearOne = async() => {
+  const clearOne = async () => {
     const sel = lastSelected.current;
     if (!sel) return;
     rectangles.current = rectangles.current.filter((r) => r !== sel);
@@ -1071,7 +1243,7 @@ async function saveShapeToDB(s) {
     }
   };
 
-  const clearAll = async() => {
+  const clearAll = async () => {
     rectangles.current = [];
     circles.current = [];
     penStrokes.current = [];
@@ -1079,7 +1251,7 @@ async function saveShapeToDB(s) {
     // re-init history root so undo does nothing until user draws again
     initHistory(makeSnapshot());
     draw();
-    await clearAllStrokes()
+    await clearAllStrokes(page.pageId)
     // broadcast to other clients
     socketRef.current?.emit("clear:all", { sourceClient: localClientId.current });
   };
@@ -1089,17 +1261,125 @@ async function saveShapeToDB(s) {
   // render
   // ---------------------------
   return (
-  <div className="relative flex justify-center items-center w-full h-full">
+    <div className="relative flex justify-center items-center w-full h-full">
 
-    {/* Canvas */}
-    <canvas
-      ref={canvasRef}
-      className="cursor-crosshair border-2 border-gray-400 rounded-lg bg-white"
-    />
+      {/* 🌑 Ambient Dark Theme - "No Page Selected" Card */}
+      {page === null && (
+        <div
+          className="
+      w-full h-full p-16 
+      flex flex-col items-center justify-center 
+      // 🎨 ADJUSTMENT: Deep Charcoal Background with Subtle Gradient
+      bg-gray-900 
+      relative overflow-hidden 
+      text-slate-100
+    "
+          style={{
+            // Add a subtle, dark radial gradient for depth and ambience
+            backgroundImage: 'radial-gradient(at 50% 10%, #374151 0%, transparent 70%)',
+          }}
+        >
+          {/* Background Pattern - Deep Dark tone, higher opacity since background is dark */}
+          <div
+            className="absolute inset-0 bg-repeat opacity-10"
+            style={{
+              // Using a dark gray for the grid pattern on a dark background
+              backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'6\' height=\'6\' viewBox=\'0 0 6 6\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%234b5563\' fill-opacity=\'0.8\' fill-rule=\'evenodd\'%3E%3Cpath d=\'M0 0h3v3H0V0zm3 3h3v3H3V3z\'/%3E%3C/g%3E%3C/svg%3E")'
+            }}
+          ></div>
 
-    {/* Fullscreen loader on top when loading */}
-    {loading && <FullscreenLoader message="Loading whiteboard..." />}
-  </div>
-);
+          {/* Main Floating Card Container - Optimized for Dark Ambience */}
+          <div
+            className="
+        relative z-10 
+        max-w-xl w-full p-10 
+        flex flex-col items-center 
+        // 🎨 ADJUSTMENT: Pure Glass effect with light border
+        backdrop-blur-xl bg-white/5 
+        rounded-3xl 
+        shadow-2xl 
+        border border-gray-700/60
+        transform transition duration-700 ease-in-out 
+        hover:scale-[1.01] hover:shadow-3xl-glow 
+        text-center
+      "
+            style={{
+              // Using a cool, bright blue glow for contrast against the dark background
+              '--tw-shadow-3xl-glow': '0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 0 45px rgba(2, 132, 199, 0.8)', // Sky-600 glow
+            }}
+          >
+
+            {/* Icon Placeholder - Bright, contrasting Sky Blue */}
+            <div className="mb-6 p-5 rounded-full bg-sky-600/20 border-2 border-sky-400 animate-bounce-slow">
+              <svg
+                className="w-16 h-16 text-sky-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.5"
+                  d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+            </div>
+
+            {/* Hero Title - Pure White for high contrast */}
+            <h2
+              className="
+          text-5xl font-black mb-3 tracking-tighter 
+          text-white 
+          drop-shadow-lg
+        "
+            >
+              A Blank Slate.
+            </h2>
+
+            {/* Core Message with Emphasis - Light text for readability */}
+            <p
+              className="
+          text-xl text-slate-300 
+          max-w-md mb-8 leading-relaxed
+        "
+            >
+              Your content area is empty. Create or select a page using the sidebar to the left to start adding your data.
+              <br />
+              <span className="font-bold text-sky-400">Let's build something great!</span>
+            </p>
+
+            {/* Subtle Hint/Footer - Muted background */}
+            <div
+              className="
+          text-sm font-mono 
+          text-gray-400 
+          p-2 rounded-lg 
+          bg-gray-700/50 
+        "
+            >
+              Status: **Awaiting Input**
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 🎨 Normal Canvas Rendering */}
+      {page !== null && (
+        <>
+          <canvas
+            ref={canvasRef}
+            className="cursor-crosshair border-2 border-gray-400 rounded-lg bg-white"
+          />
+
+          {loading && <FullscreenLoader message="Loading whiteboard..." />}
+        </>
+      )}
+
+    </div>
+
+  );
 
 }
