@@ -1,31 +1,17 @@
 "use client";
-import { useSearchParams, useRouter } from "next/navigation";
-import { useEffect } from "react";
 
-export default function AuthErrorPage() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
+export const dynamic = "force-dynamic";
 
-  const error = searchParams.get("error");
+import { useSearchParams } from "next/navigation";
 
-  useEffect(() => {
-    if (error === "NEW_USER") {
-      // redirect to register page with message
-      router.push("/api/auth?message=Please+register+first");
-    }
-  }, [error, router]);
+export default function Page() {
+  const params = useSearchParams();
+  const error = params.get("error") || "Unknown error";
 
   return (
-    <div style={{ textAlign: "center", marginTop: "50px" }}>
-      {error ? (
-        <p style={{ color: "red", fontWeight: "bold" }}>
-          {error === "NEW_USER"
-            ? "Redirecting you to register..."
-            : `Authentication error: ${error}`}
-        </p>
-      ) : (
-        <p>Unknown authentication error.</p>
-      )}
+    <div className="p-8 text-center">
+      <h1 className="text-2xl font-semibold">Authentication Error</h1>
+      <p className="mt-2 text-sm text-gray-400">{error}</p>
     </div>
   );
 }

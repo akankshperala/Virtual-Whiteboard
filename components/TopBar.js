@@ -1,6 +1,7 @@
 'use client';
 
 import { signOut } from 'next-auth/react';
+import Image from 'next/image';
 import { useState } from 'react';
 import { FaDownload, FaShare, FaSignOutAlt } from 'react-icons/fa';
 import { FiMoreVertical } from 'react-icons/fi';
@@ -280,7 +281,7 @@ export default function TopBar(page) {
             <h3 className="text-lg font-semibold mb-2">Share PNG</h3>
             <p className="text-sm text-gray-600 mb-3">Native sharing isnt available — use one of the options below.</p>
 
-            {fallbackBlobUrl && <img src={fallbackBlobUrl} alt="preview" className="w-full mb-3 rounded border" />}
+            {fallbackBlobUrl && <Image src={fallbackBlobUrl} alt="preview" className="w-full mb-3 rounded border" />}
 
             <div className="flex justify-end gap-2">
               <button onClick={handleCopyLink} className="px-3 py-1 rounded bg-gray-200">Copy link</button>
