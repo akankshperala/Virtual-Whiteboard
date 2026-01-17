@@ -9,6 +9,7 @@ import connectdb from '@/lib/mgdb';
 import User from '@/models/user.model';
 
 export const authoptions = NextAuth({
+  trustHost: true,
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID,
