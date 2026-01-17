@@ -31,7 +31,7 @@ export default function AuthPage() {
     if (status === "authenticated" && session) {
       router.push("/");
     }
-  }, [status, session]);
+  }, [status, session,router]);
 
 
 
