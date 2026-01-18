@@ -44,6 +44,8 @@ export const authoptions = NextAuth({
   session: {
     strategy: 'jwt',
   },
+  
+  
   //   callbacks: {
   //     async signIn({ user, account, profile, email }) {
   //       if (account.provider !== 'github') return true;
