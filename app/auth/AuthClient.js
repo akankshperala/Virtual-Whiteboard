@@ -126,37 +126,56 @@ export default function AuthClient() {
   //   }
   // }
 
-// Replace handleSendOtp & handleVerifyOtp
+// In your AuthClient component - UPDATE these handlers:
+
 const handleSendOtp = async () => {
-  const res = await fetch('/api/otp', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: regEmail, action: 'send' }),
-  });
-  const data = await res.json();
-  
-  if (data.success) {
-    setIsOtpModalOpen(true);
-    toast.success('OTP sent! Check your email');
-  } else {
-    toast.error(data.message);
+  try {
+    const res = await fetch('/api/otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        email: regEmail, 
+        action: 'send' 
+      }),
+    });
+    
+    const data = await res.json();
+    
+    if (data.success) {
+      setIsOtpModalOpen(true);
+      toast.success('OTP sent! Check your inbox (and spam folder)');
+    } else {
+      toast.error(data.message);
+    }
+  } catch (err) {
+    toast.error('Network error. Please try again.');
   }
 };
 
 const handleVerifyOtp = async () => {
-  const res = await fetch('/api/otp', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: regEmail, otp, action: 'verify' }),
-  });
-  const data = await res.json();
-  
-  if (data.success) {
-    setIsEmailVerified(true);
-    setIsOtpModalOpen(false);
-    toast.success('Email verified!');
-  } else {
-    toast.error(data.message);
+  try {
+    const res = await fetch('/api/otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        email: regEmail, 
+        otp, 
+        action: 'verify' 
+      }),
+    });
+    
+    const data = await res.json();
+    
+    if (data.success) {
+      setIsEmailVerified(true);
+      setIsOtpModalOpen(false);
+      setOtp(''); // Clear input
+      toast.success('Email verified! You can now register.');
+    } else {
+      toast.error(data.message);
+    }
+  } catch (err) {
+    toast.error('Verification failed. Try again.');
   }
 };
 
