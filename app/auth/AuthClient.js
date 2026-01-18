@@ -93,39 +93,72 @@ export default function AuthClient() {
 
 
 
-  // Send OTP
-  const handleSendOtp = async () => {
-    try {
-      const res = await sendOtpAction(regEmail);
-      if (res.success) {
-        setIsOtpModalOpen(true);
-        toast.success("OTP sent to your email");
-      } else {
-        toast.error(res.message);
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to send OTP");
-    }
-  }
+  // // Send OTP
+  // const handleSendOtp = async () => {
+  //   try {
+  //     const res = await sendOtpAction(regEmail);
+  //     if (res.success) {
+  //       setIsOtpModalOpen(true);
+  //       toast.success("OTP sent to your email");
+  //     } else {
+  //       toast.error(res.message);
+  //     }
+  //   } catch (err) {
+  //     console.error(err);
+  //     toast.error("Failed to send OTP");
+  //   }
+  // }
 
-  // Verify OTP
-  const handleVerifyOtp = async () => {
-    try {
-      const res = await verifyOtpAction(regEmail, otp);
-      if (res.success) {
-        setIsEmailVerified(true);
-        setIsOtpModalOpen(false);
-        toast.success("Email verified successfully!");
-      } else {
-        toast.error(res.message);
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("OTP verification failed");
-    }
-  }
+  // // Verify OTP
+  // const handleVerifyOtp = async () => {
+  //   try {
+  //     const res = await verifyOtpAction(regEmail, otp);
+  //     if (res.success) {
+  //       setIsEmailVerified(true);
+  //       setIsOtpModalOpen(false);
+  //       toast.success("Email verified successfully!");
+  //     } else {
+  //       toast.error(res.message);
+  //     }
+  //   } catch (err) {
+  //     console.error(err);
+  //     toast.error("OTP verification failed");
+  //   }
+  // }
 
+// Replace handleSendOtp & handleVerifyOtp
+const handleSendOtp = async () => {
+  const res = await fetch('/api/otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: regEmail, action: 'send' }),
+  });
+  const data = await res.json();
+  
+  if (data.success) {
+    setIsOtpModalOpen(true);
+    toast.success('OTP sent! Check your email');
+  } else {
+    toast.error(data.message);
+  }
+};
+
+const handleVerifyOtp = async () => {
+  const res = await fetch('/api/otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: regEmail, otp, action: 'verify' }),
+  });
+  const data = await res.json();
+  
+  if (data.success) {
+    setIsEmailVerified(true);
+    setIsOtpModalOpen(false);
+    toast.success('Email verified!');
+  } else {
+    toast.error(data.message);
+  }
+};
 
   // Google OAuth handler (placeholder)
   const handleGoogleAuth = () => {
